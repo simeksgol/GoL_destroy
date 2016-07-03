@@ -197,7 +197,10 @@ static double calc_edge_cost (const CensusObject *obj_1, const CensusObject *obj
 {
 	double x_dist_sq = (obj_2->mid_x - obj_1->mid_x) * (obj_2->mid_x - obj_1->mid_x);
 	double y_dist_sq = (obj_2->mid_y - obj_1->mid_y) * (obj_2->mid_y - obj_1->mid_y);
-	return pow (x_dist_sq + y_dist_sq, 0.6);
+	double dist = sqrt (x_dist_sq + y_dist_sq);
+	
+	// Return (dist ^ 1.25), calling sqrt three times is much faster than a single call to pow
+	return dist * sqrt (sqrt (dist));
 }
 
 static int compare_edges (const void *edge_1, const void *edge_2)
@@ -251,7 +254,7 @@ static s32 calc_cost (const GoLGrid *pattern)
 		edge_ix++;
 	}
 	
-	return 1 + (s32) (3.0 * spanning_tree_size);
+	return lower_of_s32 (1 + (s32) (2.5 * spanning_tree_size), COST_OFF - 1);
 }
 
 static void object_list_to_grid (const AddedObject *obj_list, int obj_cnt, GoLGrid *out_gg)
@@ -451,8 +454,6 @@ static int add_next_object (AddedObject *obj_list, int in_obj_cnt, const GoLGrid
 	u64 seen_hash = GoLGrid_get_hash_noinline (starting_point, rda) ^ GoLGrid_get_hash_noinline (useable_cat_area, rda);
 	int was_present;
 	HashTable_u64_store (seen_starting_points, seen_hash, 0, FALSE, &was_present);
-	
-	
 	if (was_present)
 		return FALSE;
 	
@@ -473,13 +474,13 @@ static int add_next_object (AddedObject *obj_list, int in_obj_cnt, const GoLGrid
 		GoLGrid_evolve_noinline (new_object, new_object_p2);
 		GoLGrid_or_noinline (new_object_p2, new_object);
 		
-		if (!GoLGrid_are_disjoint_noinline (new_object_p2, forbidden_area))
+		if (!(GoLGrid_are_disjoint_noinline (new_object_p2, forbidden_area)))
 			continue;
 		
 		if (GoLGrid_are_disjoint_noinline (new_object_p2, must_touch_area))
 			continue;
 		
-		if (!GoLGrid_are_disjoint_noinline (new_object_p2, locked_out_area))
+		if (!(GoLGrid_are_disjoint_noinline (new_object_p2, locked_out_area)))
 			continue;
 		
 		GoLGrid_copy_noinline (new_object, all_objects);
@@ -495,12 +496,13 @@ static int add_next_object (AddedObject *obj_list, int in_obj_cnt, const GoLGrid
 		
 		if (run_setup (setup, allowed_area, obj_list, in_obj_cnt + 1, out_bss))
 		{
-			printf ("Found a solution:\n");
+			printf ("Found a solution:\n\n");
 			
 			GoLGrid_copy_noinline (in_setup, result_gg);
 			GoLGrid_or_noinline (result_gg, new_object);
 			
 			GoLGrid_print_life_history_full (NULL, NULL, result_gg, all_objects, NULL, NULL);
+			printf ("\n");
 			
 			int obj_ix;
 			for (obj_ix = 1; obj_ix < in_obj_cnt + 1; obj_ix++)
@@ -593,7 +595,7 @@ static void print_lowest_cost (const ByteSeqStore *bss, const GoLGrid *problem)
 			byte_seq_to_grid (byte_seq, objects_gg);
 			GoLGrid_or_noinline (show_gg, objects_gg);
 			
-			fprintf (stderr, "Lowest cost (%d) intermediate:\n", min_cost);
+			fprintf (stderr, "Lowest cost (%d) intermediate:\n\n", min_cost);
 			GoLGrid_print_life_history_full (stderr, NULL, show_gg, objects_gg, NULL, NULL);
 			fprintf (stderr, "\n");
 			
@@ -658,7 +660,7 @@ static int parse_spec_file (const char *filename, GoLGrid *problem, GoLGrid *cat
 		spec_file = fopen (name_buf, "r");
 		if (spec_file == NULL)
 		{
-			fprintf (stderr, "Failed to open pattern file");
+			fprintf (stderr, "Failed to open pattern file\n");
 			return FALSE;
 		}
 		
@@ -764,6 +766,34 @@ static int parse_object_type (const char *digits, int *use_object_type)
 	}
 }	
 
+static int has_active_part (const GoLGrid *pattern)
+{
+	GoLGrid *gen_1 = gg [39];
+	GoLGrid *gen_2 = gg [40];
+	
+	GoLGrid_evolve_noinline (pattern, gen_1);
+	GoLGrid_evolve_noinline (gen_1, gen_2);
+	
+	return (!(GoLGrid_is_equal (pattern, gen_2)));
+}
+
+static s32 preprocess_spec (const GoLGrid *problem, GoLGrid *cat_area)
+{
+	GoLGrid *temp_bleed = gg [41];
+	GoLGrid *problem_bleed = gg [42];
+	GoLGrid *removed_cat_area = gg [43];
+	
+	GoLGrid_subtract_noinline (cat_area, problem);
+	
+	GoLGrid_bleed_8_noinline (problem, temp_bleed);
+	GoLGrid_bleed_4_noinline (temp_bleed, problem_bleed);
+	
+	GoLGrid_and_noinline (problem_bleed, cat_area, removed_cat_area);
+	GoLGrid_subtract_noinline (cat_area, problem_bleed);
+	
+	return GoLGrid_get_population_noinline (removed_cat_area);
+}
+
 static int main_do (int argc, const char *const *argv)
 {
 	if (argc != 5)
@@ -785,9 +815,9 @@ static int main_do (int argc, const char *const *argv)
 		gg [gg_ix] = &_gg [gg_ix];
 	}
 	
-	GoLGrid *problem = gg [39];
-	GoLGrid *cat_area = gg [40];
-	GoLGrid *allowed_area = gg [41];
+	GoLGrid *problem = gg [44];
+	GoLGrid *cat_area = gg [45];
+	GoLGrid *allowed_area = gg [46];
 	
 	if (!parse_spec_file (argv [1], problem, cat_area, allowed_area))
 		return EXIT_FAILURE;
@@ -817,8 +847,19 @@ static int main_do (int argc, const char *const *argv)
 		return EXIT_FAILURE;
 	}
 	
+	if (!has_active_part (problem))
+	{
+		fprintf (stderr, "Error: pattern has no active part to initiate the destruction\n");
+		return EXIT_FAILURE;
+	}
+	
+	s32 removed_cat_cells = preprocess_spec (problem, cat_area);
+	
 	fprintf (stderr, "Parsed pattern file:\n");
 	GoLGrid_print_life_history_full (stderr, NULL, problem, cat_area, allowed_area, NULL);
+	
+	if (removed_cat_cells > 0)
+		fprintf (stderr, "\nNote: %d cells with state 4 were too close to an on-cell and were changed\nto state 2\n", removed_cat_cells);
 	
 	s32 max_pool_size = (s32) parm_max_pool_size;
 	s32 max_added_objects = (s32) parm_max_objects;
@@ -875,6 +916,12 @@ static int main_do (int argc, const char *const *argv)
 			get_object_list (byte_seq, obj_list);
 			if (add_next_object (obj_list, obj_cnt - 1, problem, cat_area, allowed_area, late_phase_gens, &seen_starting_points, &tested_setups, &rda, &unfiltered))
 				return EXIT_SUCCESS;
+		}
+		
+		if (unfiltered.seq_count == 0)
+		{
+			fprintf (stderr, "\nNo continuation found, ending search\n");
+			break;
 		}
 		
 		fprintf (stderr, "Unfiltered patterns: %d\n", (s32) unfiltered.seq_count);
