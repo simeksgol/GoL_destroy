@@ -58,6 +58,9 @@ static GoLGrid *gg [GG_ARRAY_CNT];
 static s32 poss_object_cnt = 0;
 static AddedObject poss_object [MAX_POSS_OBJECTS];
 
+static CensusObject census_obj [MAX_CENSUS_OBJECTS];
+static EdgeCost edge_cost [(MAX_CENSUS_OBJECTS - 1) * MAX_CENSUS_OBJECTS / 2];
+
 static const CellList_s8 *get_object_cell_list (int object_type)
 {
 	if (object_type == 0)
@@ -138,10 +141,11 @@ static s32 census_pattern (const GoLGrid *pattern, CensusObject *obj, int max_ob
 	GoLGrid_copy (pattern, remaining);
 	
 	int obj_ix = 0;
+	s32 cell_x;
+	s32 cell_y;
+	
 	while (TRUE)
 	{
-		s32 cell_x;
-		s32 cell_y;
 		if (!GoLGrid_find_next_on_cell_noinline (remaining, (obj_ix == 0), &cell_x, &cell_y))
 			break;
 		
@@ -205,9 +209,6 @@ static int compare_edges (const void *edge_1, const void *edge_2)
 	else
 		return 0;
 }
-
-static CensusObject census_obj [MAX_CENSUS_OBJECTS];
-static EdgeCost edge_cost [MAX_CENSUS_OBJECTS * (MAX_CENSUS_OBJECTS + 1) / 2];
 
 static s32 calc_cost (const GoLGrid *pattern)
 {
