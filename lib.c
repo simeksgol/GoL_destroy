@@ -79,10 +79,10 @@ static __noinline int verify_cpu_type (int require_ssse3, int allow_avx_512f)
 	(void) allow_avx_512f;
 	
 	#ifdef __GNUC__
-		#ifdef __HAS_AVX_512F
-			if (!__builtin_cpu_supports ("avx512f"))
-				return verify_cpu_type_step_down ("AVX-512F");
-		#else
+//		#ifdef __HAS_AVX_512F
+//			if (!__builtin_cpu_supports ("avx512f"))
+//				return verify_cpu_type_step_down ("AVX-512F");
+//		#else
 			#ifdef __NO_AVX2
 				if (require_ssse3 && !__builtin_cpu_supports ("ssse3"))
 					return verify_cpu_type_unsupported ("SSSE3");
@@ -91,10 +91,10 @@ static __noinline int verify_cpu_type (int require_ssse3, int allow_avx_512f)
 			#else
 				if (!__builtin_cpu_supports ("avx2"))
 					return verify_cpu_type_step_down ("AVX2");
-				if (allow_avx_512f && __builtin_cpu_supports ("avx512f"))
-					return verify_cpu_type_step_up ("AVX-512F");
-			#endif
-		#endif
+//				if (allow_avx_512f && __builtin_cpu_supports ("avx512f"))
+//					return verify_cpu_type_step_up ("AVX-512F");
+//			#endif
+//		#endif
 	#else
 		#ifdef __HAS_AVX_512F
 			return verify_cpu_type_unknown ("AVX-512F");
