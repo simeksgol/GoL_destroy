@@ -93,7 +93,7 @@ static __noinline int verify_cpu_type (int require_ssse3, int allow_avx_512f)
 					return verify_cpu_type_step_down ("AVX2");
 //				if (allow_avx_512f && __builtin_cpu_supports ("avx512f"))
 //					return verify_cpu_type_step_up ("AVX-512F");
-//			#endif
+			#endif
 //		#endif
 	#else
 		#ifdef __HAS_AVX_512F
