@@ -18,7 +18,7 @@ typedef struct
 	s64 seq_count;
 } ByteSeqStore;
 
-static void ByteSeqStore_preinit (ByteSeqStore *bss)
+static __may_inline void ByteSeqStore_preinit (ByteSeqStore *bss)
 {
 	if (!bss)
 		return (void) ffsc (__func__);
@@ -30,7 +30,7 @@ static void ByteSeqStore_preinit (ByteSeqStore *bss)
 	bss->seq_count = 0;
 }
 
-static void ByteSeqStore_free (ByteSeqStore *bss)
+static __not_inline void ByteSeqStore_free (ByteSeqStore *bss)
 {
 	if (!bss)
 		return (void) ffsc (__func__);
@@ -45,7 +45,7 @@ static void ByteSeqStore_free (ByteSeqStore *bss)
 	ByteSeqStore_preinit (bss);
 }
 
-static ByteSeqStoreNode *ByteSeqStore_alloc_node (s32 node_size)
+static __not_inline ByteSeqStoreNode *ByteSeqStore_alloc_node (s32 node_size)
 {
 	ByteSeqStoreNode *new_node = malloc (node_size);
 	if (!new_node)
@@ -60,7 +60,7 @@ static ByteSeqStoreNode *ByteSeqStore_alloc_node (s32 node_size)
 	return new_node;
 }
 
-static int ByteSeqStore_create (ByteSeqStore *bss, s32 node_size)
+static __not_inline int ByteSeqStore_create (ByteSeqStore *bss, s32 node_size)
 {
 	if (!bss || node_size < (s32) sizeof (ByteSeqStoreNode) + BYTE_SEQ_STORE_MIN_NODE_DATA_SIZE)
 		return ffsc (__func__);
@@ -82,7 +82,7 @@ static int ByteSeqStore_create (ByteSeqStore *bss, s32 node_size)
 	return TRUE;
 }
 
-static void ByteSeqStore_clear (ByteSeqStore *bss)
+static __not_inline void ByteSeqStore_clear (ByteSeqStore *bss)
 {
 	if (!bss || !bss->last_node)
 		return (void) ffsc (__func__);
@@ -101,7 +101,7 @@ static void ByteSeqStore_clear (ByteSeqStore *bss)
 	bss->first_node->used_size = 0;
 }
 
-static int ByteSeqStore_store (ByteSeqStore *bss, const u8 *byte_seq, s32 seq_size)
+static __force_inline int ByteSeqStore_store (ByteSeqStore *bss, const u8 *byte_seq, s32 seq_size)
 {
 	if (!bss || !bss->last_node || !byte_seq || seq_size > BYTE_SEQ_STORE_MAX_BYTE_SEQ_SIZE)
 		return ffsc (__func__);
@@ -133,7 +133,7 @@ static int ByteSeqStore_store (ByteSeqStore *bss, const u8 *byte_seq, s32 seq_si
 	return TRUE;
 }
 
-static void ByteSeqStore_start_get_iteration (const ByteSeqStore *bss, ByteSeqStoreNode **bss_node, s32 *node_data_offset)
+static __not_inline void ByteSeqStore_start_get_iteration (const ByteSeqStore *bss, ByteSeqStoreNode **bss_node, s32 *node_data_offset)
 {
 	if (bss_node)
 		*bss_node = NULL;
@@ -147,7 +147,7 @@ static void ByteSeqStore_start_get_iteration (const ByteSeqStore *bss, ByteSeqSt
 	*node_data_offset = 0;
 }
 
-static int ByteSeqStore_get_next (const ByteSeqStore *bss, ByteSeqStoreNode **bss_node, s32 *node_data_offset, u8 *byte_seq, s32 max_seq_size, s32 *seq_size)
+static __force_inline int ByteSeqStore_get_next (const ByteSeqStore *bss, ByteSeqStoreNode **bss_node, s32 *node_data_offset, u8 *byte_seq, s32 max_seq_size, s32 *seq_size)
 {
 	if (seq_size)
 		*seq_size = 0;

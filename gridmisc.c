@@ -44,12 +44,12 @@ static __force_inline int GoLGrid_to_cell_list (const GoLGrid *gg, CellList_s8 *
 	return TRUE;
 }
 
-static __noinline int GoLGrid_to_cell_list_noinline (const GoLGrid *gg, CellList_s8 *cl)
+static __not_inline int GoLGrid_to_cell_list_noinline (const GoLGrid *gg, CellList_s8 *cl)
 {
 	return GoLGrid_to_cell_list (gg, cl);
 }
 
-static __noinline int GoLGrid_or_text_pattern (GoLGrid *gg, const char *pattern, int left_x, int top_y)
+static __not_inline int GoLGrid_or_text_pattern (GoLGrid *gg, const char *pattern, int left_x, int top_y)
 {
 	int not_clipped = TRUE;
 	s32 text_ix = 0;
@@ -111,7 +111,7 @@ static __force_inline int GoLGrid_or_glider (GoLGrid *gg, const Glider *gl)
 	return GoLGrid_or_cell_list (gg, glider_cells, x_offs, y_offs);
 }
 
-static __noinline int GoLGrid_or_filled_circle (GoLGrid *gg, double cent_x, double cent_y, double radius)
+static __not_inline int GoLGrid_or_filled_circle (GoLGrid *gg, double cent_x, double cent_y, double radius)
 {
 	if (!gg || !gg->grid || radius < 0.0)
 		return ffsc (__func__);
@@ -133,7 +133,7 @@ static __noinline int GoLGrid_or_filled_circle (GoLGrid *gg, double cent_x, doub
 	return not_clipped;
 }
 
-static __noinline void GoLGrid_print (const GoLGrid *gg)
+static __not_inline void GoLGrid_print (const GoLGrid *gg)
 {
 	if (!gg || !gg->grid)
 		return (void) ffsc (__func__);
@@ -161,7 +161,7 @@ static __noinline void GoLGrid_print (const GoLGrid *gg)
 	printf ("\n");
 }
 
-static __noinline void GoLGrid_int_print_life_history_symbol (FILE *stream, char symbol, s32 count, int *line_length)
+static __not_inline void GoLGrid_int_print_life_history_symbol (FILE *stream, char symbol, s32 count, int *line_length)
 {
 	if (!stream || !line_length)
 		return (void) ffsc (__func__);
@@ -186,7 +186,7 @@ static __noinline void GoLGrid_int_print_life_history_symbol (FILE *stream, char
 	}
 }
 
-static __noinline void GoLGrid_print_life_history_full (FILE *stream, const Rect *print_rect, const GoLGrid *on_gg, const GoLGrid *marked_gg, const GoLGrid *envelope_gg, const GoLGrid *special_gg)
+static __not_inline void GoLGrid_print_life_history_full (FILE *stream, const Rect *print_rect, const GoLGrid *on_gg, const GoLGrid *marked_gg, const GoLGrid *envelope_gg, const GoLGrid *special_gg)
 {
 	if ((print_rect != NULL && (print_rect->width < 0 || print_rect->height < 0)) || (!on_gg && !marked_gg && !envelope_gg && !special_gg) ||
 			(on_gg && !on_gg->grid) || (marked_gg && !marked_gg->grid) || (envelope_gg && !envelope_gg->grid) || (special_gg && !special_gg->grid))
@@ -254,12 +254,12 @@ static __noinline void GoLGrid_print_life_history_full (FILE *stream, const Rect
 	fprintf (stream, "!\n");
 }
 
-static __noinline void GoLGrid_print_life_history (const GoLGrid *on_gg)
+static __not_inline void GoLGrid_print_life_history (const GoLGrid *on_gg)
 {
 	GoLGrid_print_life_history_full (stdout, NULL, on_gg, NULL, NULL, NULL);
 }
 
-static __noinline int GoLGrid_int_get_life_history_symbol (const char **lh, int *success, int *state, s32 *count)
+static __not_inline int GoLGrid_int_get_life_history_symbol (const char **lh, int *success, int *state, s32 *count)
 {
 	if (success)
 		*success = FALSE;
@@ -316,7 +316,7 @@ static __noinline int GoLGrid_int_get_life_history_symbol (const char **lh, int 
 	}
 }
 
-static __noinline int GoLGrid_parse_life_history (const char *lh, s32 left_x, s32 top_y, GoLGrid *on_gg, GoLGrid *marked_gg, GoLGrid *envelope_gg, GoLGrid *special_gg, int *clipped, int *reinterpreted)
+static __not_inline int GoLGrid_parse_life_history (const char *lh, s32 left_x, s32 top_y, GoLGrid *on_gg, GoLGrid *marked_gg, GoLGrid *envelope_gg, GoLGrid *special_gg, int *clipped, int *reinterpreted)
 {
 // FIXME: Find a safer way to check for overflow
 
@@ -448,7 +448,7 @@ static __noinline int GoLGrid_parse_life_history (const char *lh, s32 left_x, s3
 	return TRUE;
 }
 
-static __noinline int GoLGrid_parse_life_history_simple (const char *lh, s32 left_x, s32 top_y, GoLGrid *on_gg)
+static __not_inline int GoLGrid_parse_life_history_simple (const char *lh, s32 left_x, s32 top_y, GoLGrid *on_gg)
 {
 	return GoLGrid_parse_life_history (lh, left_x, top_y, on_gg, NULL, NULL, NULL, NULL, NULL);
 }

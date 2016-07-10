@@ -48,8 +48,8 @@ typedef struct
 {
 	int obj_1;
 	int obj_2;
-	double cost;
-} EdgeCost;
+	double length_sq;
+} TreeEdge;
 
 
 static GoLGrid _gg [GG_ARRAY_CNT];
@@ -59,7 +59,7 @@ static s32 poss_object_cnt = 0;
 static AddedObject poss_object [MAX_POSS_OBJECTS];
 
 static CensusObject census_obj [MAX_CENSUS_OBJECTS];
-static EdgeCost edge_cost [(MAX_CENSUS_OBJECTS - 1) * MAX_CENSUS_OBJECTS / 2];
+static TreeEdge tree_edge [(MAX_CENSUS_OBJECTS - 1) * MAX_CENSUS_OBJECTS / 2];
 
 static const CellList_s8 *get_object_cell_list (int object_type)
 {
@@ -138,7 +138,7 @@ static s32 census_pattern (const GoLGrid *pattern, CensusObject *obj, int max_ob
 	GoLGrid *obj_bleed = gg [3];
 	GoLGrid *new_obj = gg [4];
 	
-	GoLGrid_copy (pattern, remaining);
+	GoLGrid_copy_noinline (pattern, remaining);
 	
 	int obj_ix = 0;
 	s32 cell_x;
@@ -193,21 +193,18 @@ static s32 get_cost (const u8 *byte_seq)
 	return (s32) ((((u32) (byte_seq [byte_seq_ix])) << 8) + (u32) (byte_seq [byte_seq_ix + 1]));
 }
 
-static double calc_edge_cost (const CensusObject *obj_1, const CensusObject *obj_2)
+static double calc_edge_length_sq (const CensusObject *obj_1, const CensusObject *obj_2)
 {
 	double x_dist_sq = (obj_2->mid_x - obj_1->mid_x) * (obj_2->mid_x - obj_1->mid_x);
 	double y_dist_sq = (obj_2->mid_y - obj_1->mid_y) * (obj_2->mid_y - obj_1->mid_y);
-	double dist = sqrt (x_dist_sq + y_dist_sq);
-	
-	// Return (dist ^ 1.25), calling sqrt three times is much faster than a single call to pow
-	return dist * sqrt (sqrt (dist));
+	return x_dist_sq + y_dist_sq;
 }
 
 static int compare_edges (const void *edge_1, const void *edge_2)
 {
-	if (((const EdgeCost *) edge_1)->cost < ((const EdgeCost *) edge_2)->cost)
+	if (((const TreeEdge *) edge_1)->length_sq < ((const TreeEdge *) edge_2)->length_sq)
 		return -1;
-	else if (((const EdgeCost *) edge_1)->cost > ((const EdgeCost *) edge_2)->cost)
+	else if (((const TreeEdge *) edge_1)->length_sq > ((const TreeEdge *) edge_2)->length_sq)
 		return 1;
 	else
 		return 0;
@@ -223,23 +220,23 @@ static s32 calc_cost (const GoLGrid *pattern)
 	for (obj_1_ix = 0; obj_1_ix < census_cnt; obj_1_ix++)
 		for (obj_2_ix = obj_1_ix + 1; obj_2_ix < census_cnt; obj_2_ix++)
 		{
-			edge_cost [edge_ix].obj_1 = obj_1_ix;
-			edge_cost [edge_ix].obj_2 = obj_2_ix;
-			edge_cost [edge_ix].cost = calc_edge_cost (&census_obj [obj_1_ix], &census_obj [obj_2_ix]);
+			tree_edge [edge_ix].obj_1 = obj_1_ix;
+			tree_edge [edge_ix].obj_2 = obj_2_ix;
+			tree_edge [edge_ix].length_sq = calc_edge_length_sq (&census_obj [obj_1_ix], &census_obj [obj_2_ix]);
 			edge_ix++;
 		}
 	
 	s32 edge_cnt = edge_ix;
-	qsort (edge_cost, edge_cnt, sizeof (edge_cost [0]), &compare_edges);
+	qsort (tree_edge, edge_cnt, sizeof (tree_edge [0]), &compare_edges);
 	
-	double spanning_tree_size = 0.0;
+	double spanning_tree_cost = 0.0;
 	edge_ix = 0;
 	int tree_cnt = census_cnt;
 	
 	while (tree_cnt > 1)
 	{
-		int tree_1 = census_obj [edge_cost [edge_ix].obj_1].tree_id;
-		int tree_2 = census_obj [edge_cost [edge_ix].obj_2].tree_id;
+		int tree_1 = census_obj [tree_edge [edge_ix].obj_1].tree_id;
+		int tree_2 = census_obj [tree_edge [edge_ix].obj_2].tree_id;
 		if (tree_1 != tree_2)
 		{
 			int obj_ix;
@@ -247,19 +244,21 @@ static s32 calc_cost (const GoLGrid *pattern)
 				if (census_obj [obj_ix].tree_id == tree_2)
 					census_obj [obj_ix].tree_id = tree_1;
 			
-			spanning_tree_size += edge_cost [edge_ix].cost;
+			// Final cost of an edge is (geometric length ^ 1.25). Calling sqrt three times is a lot faster than a single call to pow
+			spanning_tree_cost += sqrt (tree_edge [edge_ix].length_sq * sqrt (sqrt (tree_edge [edge_ix].length_sq)));
+			
 			tree_cnt--;
 		}
 		
 		edge_ix++;
 	}
 	
-	return lower_of_s32 (1 + (s32) (2.5 * spanning_tree_size), COST_OFF - 1);
+	return lower_of_s32 (1 + (s32) (2.5 * spanning_tree_cost), COST_OFF - 1);
 }
 
 static void object_list_to_grid (const AddedObject *obj_list, int obj_cnt, GoLGrid *out_gg)
 {
-	GoLGrid_clear (out_gg);
+	GoLGrid_clear_noinline (out_gg);
 	
 	int obj_ix;
 	for (obj_ix = 0; obj_ix < obj_cnt; obj_ix++)
@@ -275,7 +274,12 @@ static void byte_seq_to_grid (const u8 *byte_seq, GoLGrid *out_gg)
 		GoLGrid_or_cell_list (out_gg, get_object_cell_list ((int) byte_seq [1 + 3 * obj_ix]), (int) (s8) byte_seq [2 + 3 * obj_ix], (int) (s8) byte_seq [3 + 3 * obj_ix]);
 }
 
-static int run_setup (const GoLGrid *setup, const GoLGrid *allowed_area, const AddedObject *obj_list, int obj_cnt, ByteSeqStore *bss)
+static u64 out_of_bounds = 0;
+static u64 settled = 0;
+static u64 lasted_too_long = 0;
+
+// This function must not be inlined, or GCC will fail to vectorize the inlined calls to GoLGrid functions
+static __not_inline int run_setup (const GoLGrid *setup, const GoLGrid *allowed_area, const AddedObject *obj_list, int obj_cnt, ByteSeqStore *bss)
 {
 	GoLGrid *ev_m2 = gg [5];
 	GoLGrid *ev_m1 = gg [6];
@@ -287,13 +291,22 @@ static int run_setup (const GoLGrid *setup, const GoLGrid *allowed_area, const A
 	while (TRUE)
 	{
 		if (!GoLGrid_is_subset (ev_p0, allowed_area))
+		{
+			out_of_bounds++;
 			return FALSE;
+		}
 		
 		if (gen >= 2 && GoLGrid_is_equal (ev_p0, ev_m2))
+		{
+			settled++;
 			break;
+		}
 		
 		if (gen >= MAX_NEW_GENS)
+		{
+			lasted_too_long++;
 			return FALSE;
+		}
 		
 		GoLGrid *temp = ev_m2;
 		ev_m2 = ev_m1;
@@ -301,6 +314,7 @@ static int run_setup (const GoLGrid *setup, const GoLGrid *allowed_area, const A
 		ev_p0 = temp;
 		
 		GoLGrid_evolve (ev_m1, ev_p0);
+		
 		gen++;
 	}
 	
@@ -564,10 +578,71 @@ static void filter_bss (const ByteSeqStore *in_bss, ByteSeqStore *out_bss, s32 c
 	}
 }
 
+static void print_family_statistics (const ByteSeqStore *bss, int first_obj_cnt, const RandomDataArray *rda)
+{
+	GoLGrid *first_objects = gg [35];
+	
+	HashTable_u64 count_first_obj;
+	HashTable_u64_create (&count_first_obj, 64, 0.7, 0.9);
+	
+	ByteSeqStoreNode *bss_node;
+	s32 node_data_offset;
+	ByteSeqStore_start_get_iteration (bss, &bss_node, &node_data_offset);
+	
+	while (TRUE)
+	{
+		u8 byte_seq [MAX_BYTE_SEQ_SIZE];
+		if (!ByteSeqStore_get_next (bss, &bss_node, &node_data_offset, byte_seq, MAX_BYTE_SEQ_SIZE, NULL))
+			break;
+		
+		AddedObject obj_list [MAX_MAX_OBJECTS];
+		get_object_list (byte_seq, obj_list);
+		object_list_to_grid (obj_list, first_obj_cnt, first_objects);
+		
+		u64 hash = GoLGrid_get_hash_noinline (first_objects, rda);
+		
+		u64 count;
+		HashTable_u64_get_data (&count_first_obj, hash, &count);
+		HashTable_u64_store (&count_first_obj, hash, count + 1, TRUE, NULL);
+	}
+	
+	ByteSeqStore_start_get_iteration (bss, &bss_node, &node_data_offset);
+	
+	while (TRUE)
+	{
+		u8 byte_seq [MAX_BYTE_SEQ_SIZE];
+		if (!ByteSeqStore_get_next (bss, &bss_node, &node_data_offset, byte_seq, MAX_BYTE_SEQ_SIZE, NULL))
+			break;
+		
+		AddedObject obj_list [MAX_MAX_OBJECTS];
+		get_object_list (byte_seq, obj_list);
+		object_list_to_grid (obj_list, first_obj_cnt, first_objects);
+		
+		u64 hash = GoLGrid_get_hash_noinline (first_objects, rda);
+		
+		u64 count;
+		HashTable_u64_get_data (&count_first_obj, hash, &count);
+		
+		if (count > 0)
+		{
+			printf ("Count %5d: ", (int) count);
+			int obj_ix;
+			for (obj_ix = 0; obj_ix < first_obj_cnt; obj_ix++)
+				printf ("(%d,%d,%d) ", obj_list [obj_ix].object_type, obj_list [obj_ix].left_x, obj_list [obj_ix].top_y);
+			
+			printf ("\n");
+		}
+		
+		HashTable_u64_store (&count_first_obj, hash, 0, TRUE, NULL);
+	}
+	
+	HashTable_u64_free (&count_first_obj);
+}
+
 static void print_lowest_cost (const ByteSeqStore *bss, const GoLGrid *problem)
 {
-	GoLGrid *objects_gg = gg [35];
-	GoLGrid *show_gg = gg [36];
+	GoLGrid *objects_gg = gg [36];
+	GoLGrid *show_gg = gg [37];
 	
 	ByteSeqStoreNode *bss_node;
 	s32 node_data_offset;
@@ -606,8 +681,8 @@ static void print_lowest_cost (const ByteSeqStore *bss, const GoLGrid *problem)
 
 static void make_poss_objects (const GoLGrid *cat_area, int *use_object_type)
 {
-	GoLGrid *object_gg = gg [37];
-	GoLGrid *object_p2 = gg [38];
+	GoLGrid *object_gg = gg [38];
+	GoLGrid *object_p2 = gg [39];
 	
 	int y_ix;
 	int x_ix;
@@ -768,20 +843,20 @@ static int parse_object_type (const char *digits, int *use_object_type)
 
 static int has_active_part (const GoLGrid *pattern)
 {
-	GoLGrid *gen_1 = gg [39];
-	GoLGrid *gen_2 = gg [40];
+	GoLGrid *gen_1 = gg [40];
+	GoLGrid *gen_2 = gg [41];
 	
 	GoLGrid_evolve_noinline (pattern, gen_1);
 	GoLGrid_evolve_noinline (gen_1, gen_2);
 	
-	return (!(GoLGrid_is_equal (pattern, gen_2)));
+	return (!(GoLGrid_is_equal_noinline (pattern, gen_2)));
 }
 
 static s32 preprocess_spec (const GoLGrid *problem, GoLGrid *cat_area)
 {
-	GoLGrid *temp_bleed = gg [41];
-	GoLGrid *problem_bleed = gg [42];
-	GoLGrid *removed_cat_area = gg [43];
+	GoLGrid *temp_bleed = gg [42];
+	GoLGrid *problem_bleed = gg [43];
+	GoLGrid *removed_cat_area = gg [44];
 	
 	GoLGrid_subtract_noinline (cat_area, problem);
 	
@@ -815,9 +890,9 @@ static int main_do (int argc, const char *const *argv)
 		gg [gg_ix] = &_gg [gg_ix];
 	}
 	
-	GoLGrid *problem = gg [44];
-	GoLGrid *cat_area = gg [45];
-	GoLGrid *allowed_area = gg [46];
+	GoLGrid *problem = gg [45];
+	GoLGrid *cat_area = gg [46];
+	GoLGrid *allowed_area = gg [47];
 	
 	if (!parse_spec_file (argv [1], problem, cat_area, allowed_area))
 		return EXIT_FAILURE;
@@ -892,6 +967,9 @@ static int main_do (int argc, const char *const *argv)
 		if (obj_cnt > 1)
 			print_lowest_cost (&filtered, problem);
 		
+//		if (obj_cnt > 1)
+//			print_family_statistics (&filtered, 1, &rda);
+		
 		ByteSeqStore_clear (&unfiltered);
 		
 		ByteSeqStoreNode *bss_node;
@@ -957,6 +1035,13 @@ static int main_do (int argc, const char *const *argv)
 		
 		printf ("%d objects, cost range: %d - %d\n", obj_cnt, lowest_cost, cost_ix);
 		
+		double sum = (double) out_of_bounds + (double) settled + (double) lasted_too_long;
+		double oob = 100.0 * (double) out_of_bounds / sum;
+		double set = 100.0 * (double) settled / sum;
+		double ltl = 100.0 * (double) lasted_too_long / sum;
+		
+		fprintf (stderr, "Out of bounds = %.2f%%, settled = %.2f%%, lasted too long = %.2f%%\n", oob, set, ltl);
+		
 		ByteSeqStore_clear (&filtered);
 		filter_bss (&unfiltered, &filtered, cost_ix, new_pool_size - old_pool_size, max_pool_size - old_pool_size);
 	}
@@ -966,7 +1051,7 @@ static int main_do (int argc, const char *const *argv)
 
 int main (int argc, const char *const *argv)
 {
-	if (!verify_cpu_type (FALSE, FALSE))
+	if (!verify_cpu_type ())
 		return EXIT_FAILURE;
 	
 	if (!main_do (argc, argv))

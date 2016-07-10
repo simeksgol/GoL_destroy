@@ -1,5 +1,3 @@
-// FIXME: Change calls to GoLGrid_copy_unmatched into GoLGrid_copy where possible
-
 // A description of a glider
 // (dir) is 0 for a NW, 1 for a NE, 2 for a SE and 3 for SW-bound glider
 // (lane) is the x-coordinate for the center cell of the glider if it is moved backwards or forwards in time, so that its center cell has y-coordinate 0
@@ -22,6 +20,11 @@ typedef struct
 // (timing) is the generation if the spaceship is moved backwards or forwards in time, so that it is in the phase with the low population count, and the off-cell with 5 on-cell neighbours has y-coordinate 0
 // for a N or S-bound ship, or x-coordinate 0 for a W or E-bound ship
 // (parity) is 0 if the "arrow" in the phase with the low population count points towards NW or SE when generation = (timing), and 1 if it points towards NE or SW at that time
+
+// Suggested new definition of (parity) (not implemented):
+// (parity) is 0 if, when the XWSS is in a phase with the low population count and where the sum of the x- och y-coordinate of the off-cell with 5 on-cell neighbours is an even number, the "arrow" points
+// to the left when looking in the direction of travel of the XWSS, or 1 otherwise
+
 
 typedef struct
 {
@@ -81,7 +84,7 @@ static const s32 CellList_s8_spaceship_offset [4] [4] [2] =
 static const s32 CellList_s8_glider_dir [4] [4] = {{ 1,  1,  0,  1}, {-1,  1,  0, -1}, {-1, -1,  0,  1}, { 1, -1,  0, -1}};
 static const s32 CellList_s8_xwss_dir [4] [4] = {{ 0,  1,  1,  0}, {-1,  0,  0,  1}, { 0, -1,  1,  0}, { 1,  0,  0,  1}};
 
-static __noinline void CellList_s8_init_transpose (GoLGrid *obj, int symmetry_case, s32 move_x, s32 move_y, CellList_s8_InitEnv *cie)
+static __not_inline void CellList_s8_init_transpose (GoLGrid *obj, int symmetry_case, s32 move_x, s32 move_y, CellList_s8_InitEnv *cie)
 {
 	if (!obj || !obj->grid || symmetry_case < 0 || symmetry_case > 7 || !cie)
 		return (void) ffsc (__func__);
@@ -94,22 +97,22 @@ static __noinline void CellList_s8_init_transpose (GoLGrid *obj, int symmetry_ca
 	if (symmetry_case & 4)
 		GoLGrid_flip_diagonally_noinline (&cie->zero_gg_1, &cie->zero_gg_2);
 	else
-		GoLGrid_copy_unmatched_noinline (&cie->zero_gg_1, &cie->zero_gg_2, 0, 0);
+		GoLGrid_copy_noinline (&cie->zero_gg_1, &cie->zero_gg_2);
 	
 	if (symmetry_case & 2)
 		GoLGrid_flip_vertically_noinline (&cie->zero_gg_2, &cie->zero_gg_1);
 	else
-		GoLGrid_copy_unmatched_noinline (&cie->zero_gg_2, &cie->zero_gg_1, 0, 0);
+		GoLGrid_copy_noinline (&cie->zero_gg_2, &cie->zero_gg_1);
 	
 	if (((symmetry_case & 3) == 1) || ((symmetry_case & 3) == 2))
 		GoLGrid_flip_horizontally_noinline (&cie->zero_gg_1, &cie->zero_gg_2);
 	else
-		GoLGrid_copy_unmatched_noinline (&cie->zero_gg_1, &cie->zero_gg_2, 0, 0);
+		GoLGrid_copy_noinline (&cie->zero_gg_1, &cie->zero_gg_2);
 	
 	GoLGrid_copy_unmatched_noinline (&cie->zero_gg_2, obj, bb.left_x + move_x, bb.top_y + move_y);
 }
 
-static __noinline void CellList_s8_init_evolve (GoLGrid *obj, s32 gen_count, CellList_s8_InitEnv *cie)
+static __not_inline void CellList_s8_init_evolve (GoLGrid *obj, s32 gen_count, CellList_s8_InitEnv *cie)
 {
 	if (!obj || !obj->grid || gen_count < 0 || !cie)
 		return (void) ffsc (__func__);
@@ -118,11 +121,11 @@ static __noinline void CellList_s8_init_evolve (GoLGrid *obj, s32 gen_count, Cel
 	for (gen = 0; gen < gen_count; gen++)
 	{
 		GoLGrid_evolve_noinline (obj, &cie->temp_gg);
-		GoLGrid_copy_unmatched_noinline (&cie->temp_gg, obj, 0, 0);
+		GoLGrid_copy_noinline (&cie->temp_gg, obj);
 	}
 }
 
-static __noinline CellList_s8 *CellList_s8_init_store (const GoLGrid *gg, CellList_s8_InitEnv *cie)
+static __not_inline CellList_s8 *CellList_s8_init_store (const GoLGrid *gg, CellList_s8_InitEnv *cie)
 {
 	if (!gg || !gg->grid || !cie || cie->cell_list_ix >= CELLLIST_S8_STATIC_CELL_LIST_SIZE)
 		return ffsc_p (__func__);
@@ -143,7 +146,7 @@ static __noinline CellList_s8 *CellList_s8_init_store (const GoLGrid *gg, CellLi
 	return cl;
 }
 
-static __noinline void CellList_s8_init ()
+static __not_inline void CellList_s8_init (void)
 {
 	if (CellList_s8_is_initialized)
 		return (void) ffsc (__func__);
@@ -181,10 +184,6 @@ static __noinline void CellList_s8_init ()
 	int orientation;
 	for (orientation = 0; orientation < 4; orientation++)
 	{
-	}
-	
-	for (orientation = 0; orientation < 4; orientation++)
-	{
 		GoLGrid_parse_life_history_simple ("b2o$o2bo$obo$bo!", 0, 0, &obj);
 		CellList_s8_init_transpose (&obj, orientation, 0, 0, &cie);
 		CellList_s8_loaf_cells [orientation] = CellList_s8_init_store (&obj, &cie);
@@ -219,7 +218,7 @@ static __noinline void CellList_s8_init ()
 	CellList_s8_is_initialized = TRUE;
 }
 
-static __force_inline const CellList_s8 *CellList_s8_get_block_cells ()
+static __force_inline const CellList_s8 *CellList_s8_get_block_cells (void)
 {
 	if (!CellList_s8_is_initialized)
 		CellList_s8_init ();
@@ -271,7 +270,7 @@ static __force_inline const CellList_s8 *CellList_s8_get_boat_cells (int orienta
 	return CellList_s8_boat_cells [orientation];
 }
 
-static __force_inline const CellList_s8 *CellList_s8_get_pond_cells ()
+static __force_inline const CellList_s8 *CellList_s8_get_pond_cells (void)
 {
 	if (!CellList_s8_is_initialized)
 		CellList_s8_init ();
@@ -301,7 +300,7 @@ static __force_inline const CellList_s8 *CellList_s8_get_glider_cells (const Gli
 	return CellList_s8_spaceship_cells [0] [gl->dir] [gen_0_timing & 3];
 }
 
-static __noinline const CellList_s8 *CellList_s8_get_spaceship_cells (const StandardSpaceship *ship, s32 generation, s32 *x_to_add, s32 *y_to_add)
+static __not_inline const CellList_s8 *CellList_s8_get_spaceship_cells (const StandardSpaceship *ship, s32 generation, s32 *x_to_add, s32 *y_to_add)
 {
 	if (!ship || ship->size < 0 || ship->size > 3 || ship->dir < 0 || ship->dir > 3 || ship->parity < 0 || ship->parity > 1 || (ship->size == 0 && ship->parity != 0) || !x_to_add || !y_to_add)
 	{

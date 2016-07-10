@@ -8,7 +8,7 @@ typedef struct
 	u64 *random_data;
 } RandomDataArray;
 
-static __inline_at_will void RandomDataArray_preinit (RandomDataArray *rda)
+static __may_inline void RandomDataArray_preinit (RandomDataArray *rda)
 {
 	if (!rda)
 		return (void) ffsc (__func__);
@@ -18,7 +18,7 @@ static __inline_at_will void RandomDataArray_preinit (RandomDataArray *rda)
 	rda->random_data = NULL;
 }
 
-static __noinline void RandomDataArray_free (RandomDataArray *rda)
+static __not_inline void RandomDataArray_free (RandomDataArray *rda)
 {
 	if (!rda)
 		return (void) ffsc (__func__);
@@ -29,7 +29,7 @@ static __noinline void RandomDataArray_free (RandomDataArray *rda)
 	RandomDataArray_preinit (rda);
 }
 
-static __noinline int RandomDataArray_create (RandomDataArray *rda, u64 size)
+static __not_inline int RandomDataArray_create (RandomDataArray *rda, u64 size)
 {
 	if (!rda)
 		return ffsc (__func__);

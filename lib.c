@@ -17,20 +17,31 @@
 #define u32_MAX UINT32_MAX
 #define u64_MAX UINT64_MAX
 
-#define __inline_at_will
-
 #ifdef __INTEL_COMPILER
-	#define __noinline __declspec(noinline)
+	#define __not_inline __declspec(noinline)
+	#define __may_inline
 	#define __force_inline inline __forceinline
 #else
 	#ifdef __GNUC__
-		#define __noinline __attribute__((noinline))
+		#define __not_inline __attribute__((noinline))
+		#define __may_inline
 		#define __force_inline inline __attribute__((always_inline))
+	#else
+		#define __not_inline
+		#define __may_inline
+		#define __force_inline inline
+	#endif
+#endif
+
+#ifdef __HAS_AVX_512F
+	#ifndef __ALLOW_AVX_512F
+		#define __ALLOW_AVX_512F
 	#endif
 #endif
 
 #define MAX_SUPPORTED_VECTOR_BYTE_SIZE 64
 
+// Vectorization is possible even when compiling for 32-bit x86 on Pentium 4, so hardly any reason to have a symbol for no vectorization at all
 #ifdef __HAS_AVX_512F
 	#define PREFERRED_VECTOR_BYTE_SIZE 64
 #else
@@ -41,7 +52,7 @@
 	#endif
 #endif
 
-static __noinline int verify_cpu_type_step_up (const char *feature)
+static __not_inline int verify_cpu_type_step_up (const char *feature)
 {
 	fprintf (stderr, "Note: This executable was compiled for CPUs without support for %s,\n", feature);
 	fprintf (stderr, "      but this CPU does support %s. The program will run faster\n", feature);
@@ -49,7 +60,7 @@ static __noinline int verify_cpu_type_step_up (const char *feature)
 	return TRUE;
 }
 
-static __noinline int verify_cpu_type_step_down (const char *feature)
+static __not_inline int verify_cpu_type_step_down (const char *feature)
 {
 	fprintf (stderr, "Error: This executable was compiled for CPUs with support for %s,\n", feature);
 	fprintf (stderr, "       but this CPU doesn't support that. Please use the executable\n");
@@ -57,14 +68,14 @@ static __noinline int verify_cpu_type_step_down (const char *feature)
 	return FALSE;
 }
 
-static __noinline int verify_cpu_type_unsupported (const char *feature)
+static __not_inline int verify_cpu_type_unsupported (const char *feature)
 {
 	fprintf (stderr, "Error: This CPU doesn't support %s, but all executable versions of this\n", feature);
 	fprintf (stderr, "       program require that.\n");
 	return FALSE;
 }
 
-static __noinline int verify_cpu_type_unknown (const char *feature)
+static __not_inline int verify_cpu_type_unknown (const char *feature)
 {
 	fprintf (stderr, "Warning: This executable was compiled for CPUs with support for %s,\n", feature);
 	fprintf (stderr, "         but it is not checked if this CPU supports that. If the program\n");
@@ -73,28 +84,29 @@ static __noinline int verify_cpu_type_unknown (const char *feature)
 	return TRUE;
 }
 
-static __noinline int verify_cpu_type (int require_ssse3, int allow_avx_512f)
+static __not_inline int verify_cpu_type (void)
 {
-	(void) require_ssse3;
-	(void) allow_avx_512f;
-	
-	#ifdef __GNUC__
-//		#ifdef __HAS_AVX_512F
-//			if (!__builtin_cpu_supports ("avx512f"))
-//				return verify_cpu_type_step_down ("AVX-512F");
-//		#else
+	#if __GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 8)
+		#ifdef __HAS_AVX_512F
+			if (!__builtin_cpu_supports ("avx512f"))
+				return verify_cpu_type_step_down ("AVX-512F");
+		#else
 			#ifdef __NO_AVX2
-				if (require_ssse3 && !__builtin_cpu_supports ("ssse3"))
-					return verify_cpu_type_unsupported ("SSSE3");
+				#ifdef __REQUIRE_SSSE3
+					if (!__builtin_cpu_supports ("ssse3"))
+						return verify_cpu_type_unsupported ("SSSE3");
+				#endif
 				if (__builtin_cpu_supports ("avx2"))
 					return verify_cpu_type_step_up ("AVX2");
 			#else
 				if (!__builtin_cpu_supports ("avx2"))
 					return verify_cpu_type_step_down ("AVX2");
-//				if (allow_avx_512f && __builtin_cpu_supports ("avx512f"))
-//					return verify_cpu_type_step_up ("AVX-512F");
+				#ifdef __ALLOW_AVX_512F
+					if (__builtin_cpu_supports ("avx512f"))
+						return verify_cpu_type_step_up ("AVX-512F");
+				#endif
 			#endif
-//		#endif
+		#endif
 	#else
 		#ifdef __HAS_AVX_512F
 			return verify_cpu_type_unknown ("AVX-512F");
@@ -108,13 +120,13 @@ static __noinline int verify_cpu_type (int require_ssse3, int allow_avx_512f)
 	return TRUE;
 }
 
-static __noinline int ffsc (const char *fname)
+static __not_inline int ffsc (const char *fname)
 {
 	fprintf (stderr, "%s failed in function entry sanity check\n", (fname ? fname : "<unknown function namn>"));
 	return FALSE;
 }
 
-static __noinline void *ffsc_p (const char *fname)
+static __not_inline void *ffsc_p (const char *fname)
 {
 	fprintf (stderr, "%s failed in function entry sanity check\n", (fname ? fname : "<unknown function namn>"));
 	return NULL;
@@ -223,7 +235,7 @@ static __force_inline u64 bit_reverse_u64 (u64 arg)
 	return (arg << 32) | (arg >> 32);
 }
 
-static __noinline u64 combinations_u64 (u64 n, u64 r)
+static __not_inline u64 combinations_u64 (u64 n, u64 r)
 {
 	if (r > n)
 		return 0;
@@ -259,7 +271,7 @@ static __force_inline u64 next_higher_with_same_bit_count_u64 (u64 arg)
 	return (((arg >> flip_bit) + 1) << flip_bit) | ((((u64) 1) << (ls_ones_in_a_row - 1)) - 1);
 }
 
-static __noinline int digits_in_u32 (u32 arg)
+static __not_inline int digits_in_u32 (u32 arg)
 {
 	int digits = 1;
 	
@@ -285,7 +297,7 @@ static __force_inline s32 round_double (double arg)
 static u64 random_u64_state_0 = 0x19803c70561f8414u;
 static u64 random_u64_state_1 = 0xcaca61eeae213995u;
 
-static __inline_at_will void random_u64_set_seed (u64 seed_1, u64 seed_2, int xor_with_current_time)
+static __may_inline void random_u64_set_seed (u64 seed_1, u64 seed_2, int xor_with_current_time)
 {
 	u64 cur_time = 0;
 	if (xor_with_current_time)
@@ -295,7 +307,7 @@ static __inline_at_will void random_u64_set_seed (u64 seed_1, u64 seed_2, int xo
 	random_u64_state_1 = seed_2 ^ cur_time;
 }
 
-static __force_inline u64 random_u64 ()
+static __force_inline u64 random_u64 (void)
 {
 	u64 x = random_u64_state_0;
 	u64 y = random_u64_state_1;
@@ -305,12 +317,12 @@ static __force_inline u64 random_u64 ()
 	return random_u64_state_1 + y;
 }
 
-static __noinline void print_hex_u64 (char *text, u64 arg)
+static __not_inline void print_hex_u64 (char *text, u64 arg)
 {
 	printf ("%s%08x%08x\n", (text ? text : ""), (u32) (arg >> 32), (u32) arg);
 }
 
-static __noinline void print_bin_u64 (char *text, u64 arg)
+static __not_inline void print_bin_u64 (char *text, u64 arg)
 {
 	printf ("%s", (text ? text : ""));
 	int bit;
@@ -324,12 +336,12 @@ static __noinline void print_bin_u64 (char *text, u64 arg)
 
 static __force_inline const void *align_down_const_pointer (const void *p, u64 alignment)
 {
-	return (const void *) ((uintptr_t) p & ~(alignment - 1));
+	return (const void *) (((uintptr_t) p) & (uintptr_t) ~(alignment - 1));
 }
 
 static __force_inline void *align_down_pointer (void *p, u64 alignment)
 {
-	return (void *) ((uintptr_t) p & ~(alignment - 1));
+	return (void *) (((uintptr_t) p) & (uintptr_t) ~(alignment - 1));
 }
 
 // We cast alignment to an s32 so that the and operation is performed on signed numbers. This avoids the final implicit conversion of an unsigned number
@@ -355,14 +367,14 @@ static __force_inline u64 align_down_u64 (u64 arg, u64 alignment)
 	return arg & ~(alignment - 1);
 }
 
-static __noinline int allocate_aligned (u64 size, u64 alignment, u64 alignment_offset, int clear, void **allocated_buffer, void **aligned_buffer)
+static __not_inline int allocate_aligned (u64 size, u64 alignment, u64 alignment_offset, int clear, void **allocated_buffer, void **aligned_buffer)
 {
 	if (aligned_buffer)
 		*aligned_buffer = NULL;
 	if (allocated_buffer)
 		*allocated_buffer = NULL;
 	
-	if (size == 0 || bit_count_u64 ((u64) alignment) != 1 || alignment_offset >= alignment || !allocated_buffer || !aligned_buffer)
+	if (size == 0 || bit_count_u64 (alignment) != 1 || alignment_offset >= alignment || !allocated_buffer || !aligned_buffer)
 		return ffsc (__func__);
 	
 	void *buffer = malloc (size + alignment);
@@ -373,12 +385,12 @@ static __noinline int allocate_aligned (u64 size, u64 alignment, u64 alignment_o
 		memset (buffer, 0, size + alignment);
 	
 	*allocated_buffer = buffer;
-	*aligned_buffer = (void *) ((((uintptr_t) buffer + (alignment - (1 + alignment_offset))) & ~(alignment - 1)) + alignment_offset);
+	*aligned_buffer = (void *) (((((uintptr_t) buffer) + (uintptr_t) (alignment - (1 + alignment_offset))) & (uintptr_t) ~(alignment - 1)) + (uintptr_t) alignment_offset);
 	
 	return TRUE;
 }
 
-static __noinline int parse_u64 (const char **s, u64 *num)
+static __not_inline int parse_u64 (const char **s, u64 *num)
 {
 	if (num)
 		*num = 0;
@@ -413,7 +425,7 @@ static __noinline int parse_u64 (const char **s, u64 *num)
 	return (started && !overflow);
 }
 
-static __noinline int str_to_u32 (const char *s, u32 *num)
+static __not_inline int str_to_u32 (const char *s, u32 *num)
 {
 	if (num)
 		 *num = 0;
@@ -432,7 +444,7 @@ static __noinline int str_to_u32 (const char *s, u32 *num)
 	return TRUE;
 }
 
-static __noinline int str_to_u64 (const char *s, u64 *num)
+static __not_inline int str_to_u64 (const char *s, u64 *num)
 {
 	if (num)
 		 *num = 0;

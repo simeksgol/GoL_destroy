@@ -25,7 +25,7 @@ typedef struct
 
 // Internal functions
 
-static __inline_at_will void GoLGrid_int_preinit (GoLGrid *gg)
+static __may_inline void GoLGrid_int_preinit (GoLGrid *gg)
 {
 	Rect_make (&gg->grid_rect, 0, 0, 0, 0);
 	gg->grid = NULL;
@@ -86,28 +86,46 @@ static __force_inline int GoLGrid_int_tighten_pop_x_on (GoLGrid *gg)
 	
 	s32 col_ix;
 	s32 row_ix;
-	u64 or_of_column;
-	
 	for (col_ix = col_on; col_ix < col_off; col_ix++)
 	{
-		or_of_column = 0;
+		u64 or_of_col = 0;
 		for (row_ix = 0; row_ix < row_cnt; row_ix++)
-			or_of_column |= entry [row_ix];
+			or_of_col |= entry [row_ix];
 		
-		if (or_of_column != 0)
-			break;
+		if (or_of_col != 0)
+                {
+                        gg->pop_x_on = (64 * col_ix) + (63 - most_significant_bit_u64 (or_of_col));
+                	return TRUE;
+                }
 		
 		entry += col_offset;
 	}
 	
-	if (or_of_column == 0)
+	GoLGrid_int_set_empty_population_rect (gg);
+	return FALSE;
+}
+
+static __force_inline int GoLGrid_int_tighten_pop_x_on_64_wide (GoLGrid *gg)
+{
+	s32 row_on = align_down_s32 (gg->pop_y_on, PREFERRED_VECTOR_BYTE_SIZE / sizeof (u64));
+	s32 row_off = align_up_s32 (gg->pop_y_off, PREFERRED_VECTOR_BYTE_SIZE / sizeof (u64));
+	s32 row_cnt = row_off - row_on;
+	
+	const u64 *entry = align_down_const_pointer (gg->grid + (u64) row_on, PREFERRED_VECTOR_BYTE_SIZE);
+	
+	u64 or_of_col = 0;
+	s32 row_ix;
+	for (row_ix = 0; row_ix < row_cnt; row_ix++)
+		or_of_col |= entry [row_ix];
+	
+	if (or_of_col != 0)
 	{
-		GoLGrid_int_set_empty_population_rect (gg);
-		return FALSE;
+	       gg->pop_x_on = 63 - most_significant_bit_u64 (or_of_col);
+	       return TRUE;
 	}
 	
-	gg->pop_x_on = (64 * col_ix) + (63 - most_significant_bit_u64 (or_of_column));
-	return TRUE;
+        GoLGrid_int_set_empty_population_rect (gg);
+	return FALSE;
 }
 
 static __force_inline void GoLGrid_int_tighten_pop_x_off (GoLGrid *gg)
@@ -124,21 +142,36 @@ static __force_inline void GoLGrid_int_tighten_pop_x_off (GoLGrid *gg)
 	
 	s32 col_ix;
 	s32 row_ix;
-	u64 or_of_column;
-	
 	for (col_ix = col_off - 1; col_ix >= col_on; col_ix--)
 	{
-		or_of_column = 0;
+		u64 or_of_col = 0;
 		for (row_ix = 0; row_ix < row_cnt; row_ix++)
-			or_of_column |= entry [row_ix];
+			or_of_col |= entry [row_ix];
 		
-		if (or_of_column != 0)
-			break;
-		
+		if (or_of_col != 0)
+                {
+                	gg->pop_x_off = (64 * col_ix) + (64 - least_significant_bit_u64 (or_of_col));
+			return;
+		}
+                
 		entry -= col_offset;
 	}
+}
+
+static __force_inline void GoLGrid_int_tighten_pop_x_off_64_wide (GoLGrid *gg)
+{
+	s32 row_on = align_down_s32 (gg->pop_y_on, PREFERRED_VECTOR_BYTE_SIZE / sizeof (u64));
+	s32 row_off = align_up_s32 (gg->pop_y_off, PREFERRED_VECTOR_BYTE_SIZE / sizeof (u64));
+	s32 row_cnt = row_off - row_on;
 	
-	gg->pop_x_off = (64 * col_ix) + (64 - least_significant_bit_u64 (or_of_column));
+	const u64 *entry = align_down_const_pointer (gg->grid + (u64) row_on, PREFERRED_VECTOR_BYTE_SIZE);
+	
+	u64 or_of_col = 0;
+	s32 row_ix;
+	for (row_ix = 0; row_ix < row_cnt; row_ix++)
+		or_of_col |= entry [row_ix];
+	
+	gg->pop_x_off = 64 - least_significant_bit_u64 (or_of_col);
 }
 
 static __force_inline void GoLGrid_int_tighten_pop_y_on (GoLGrid *gg)
@@ -161,6 +194,12 @@ static __force_inline void GoLGrid_int_tighten_pop_y_on (GoLGrid *gg)
 	}
 }
 
+static __force_inline void GoLGrid_int_tighten_pop_y_on_64_wide (GoLGrid *gg)
+{
+	while (gg->grid [gg->pop_y_on] == 0)
+		gg->pop_y_on++;
+}
+
 static __force_inline void GoLGrid_int_tighten_pop_y_off (GoLGrid *gg)
 {
 	s32 col_on = gg->pop_x_on >> 6;
@@ -179,6 +218,12 @@ static __force_inline void GoLGrid_int_tighten_pop_y_off (GoLGrid *gg)
 		
 		new_y_off--;
 	}
+}
+
+static __force_inline void GoLGrid_int_tighten_pop_y_off_64_wide (GoLGrid *gg)
+{
+	while (gg->grid [gg->pop_y_off - 1] == 0)
+		gg->pop_y_off--;
 }
 
 static __force_inline void GoLGrid_int_adjust_pop_rect_new_off_cell (GoLGrid *gg, s32 x, s32 y)
@@ -217,13 +262,12 @@ static __force_inline void GoLGrid_int_adjust_pop_rect_ored_bounding_box (GoLGri
 	}
 }
 
-// We expect this function to be vectorized, so row_on and row_cnt should be aligned according to the expected vector size. Inlining is expected to propagate the alignment information from the calling
-// function, to prevent generating peeling code. If compiled with GCC, we use the -fno-tree-loop-distribute-patterns option to prevent the compiler from replacing the inner loop with a call to memset
+// We expect these functions to be vectorized, so row_on and row_cnt should be aligned according to the expected vector size. Inlining is expected to propagate the alignment information from the calling
+// function, to prevent generating peeling code. If compiled with GCC, we use the -fno-tree-loop-distribute-patterns option to prevent the compiler from replacing the clearing loop with a call to memset
 static __force_inline void GoLGrid_int_clear_column_range (GoLGrid *gg, s32 col_on, s32 col_off, s32 row_on, s32 row_off)
 {
 	u64 col_offset = align_down_u64 (gg->col_offset, PREFERRED_VECTOR_BYTE_SIZE / sizeof (u64));
 	u64 *entry = align_down_pointer (gg->grid + (col_offset * (u64) col_on) + (u64) row_on, PREFERRED_VECTOR_BYTE_SIZE);
-	
 	s32 row_cnt = row_off - row_on;
 	
 	s32 col_ix;
@@ -237,9 +281,19 @@ static __force_inline void GoLGrid_int_clear_column_range (GoLGrid *gg, s32 col_
 	}
 }
 
+static __force_inline void GoLGrid_int_clear_column_64_wide (GoLGrid *gg, s32 row_on, s32 row_off)
+{
+	u64 *entry = align_down_pointer (gg->grid + (u64) row_on, PREFERRED_VECTOR_BYTE_SIZE);
+	s32 row_cnt = row_off - row_on;
+	
+	s32 row_ix;
+	for (row_ix = 0; row_ix < row_cnt; row_ix++)
+		entry [row_ix] = 0;
+}
+
 // Clears all non-empty area in the grid that would be unaffected by a copy-type operation to the specified part. The grid may not be entirely empty when this function is called
 // The population limits are not changed, this is the responsibility of the calling function
-static __noinline void GoLGrid_int_clear_unaffected_area (GoLGrid *gg, s32 copy_col_on, s32 copy_col_off, s32 copy_row_on, s32 copy_row_off)
+static __not_inline void GoLGrid_int_clear_unaffected_area (GoLGrid *gg, s32 copy_col_on, s32 copy_col_off, s32 copy_row_on, s32 copy_row_off)
 {
 	s32 clear_col_on = gg->pop_x_on >> 6;
 	s32 clear_col_off = (gg->pop_x_off + 63) >> 6;
@@ -263,11 +317,32 @@ static __noinline void GoLGrid_int_clear_unaffected_area (GoLGrid *gg, s32 copy_
 	if (copy_col_off < clear_col_off)
 		GoLGrid_int_clear_column_range (gg, copy_col_off, clear_col_off, clear_row_on, clear_row_off);
 	
-	if (gg->pop_y_on < copy_row_on)
+	if (clear_row_on < copy_row_on)
 		GoLGrid_int_clear_column_range (gg, higher_of_s32 (copy_col_on, clear_col_on), lower_of_s32 (copy_col_off, clear_col_off), clear_row_on, copy_row_on);
 	
-	if (copy_row_off < gg->pop_y_off)
+	if (copy_row_off < clear_row_off)
 		GoLGrid_int_clear_column_range (gg, higher_of_s32 (copy_col_on, clear_col_on), lower_of_s32 (copy_col_off, clear_col_off), copy_row_off, clear_row_off);
+}
+
+static __not_inline void GoLGrid_int_clear_unaffected_area_64_wide (GoLGrid *gg, s32 copy_row_on, s32 copy_row_off)
+{
+	copy_row_on = align_up_s32 (copy_row_on, PREFERRED_VECTOR_BYTE_SIZE / sizeof (u64));
+	copy_row_off = align_down_s32 (copy_row_off, PREFERRED_VECTOR_BYTE_SIZE / sizeof (u64));
+	
+	s32 clear_row_on = align_down_s32 (gg->pop_y_on, PREFERRED_VECTOR_BYTE_SIZE / sizeof (u64));
+	s32 clear_row_off = align_up_s32 (gg->pop_y_off, PREFERRED_VECTOR_BYTE_SIZE / sizeof (u64));
+	
+	if (copy_row_on >= clear_row_off || copy_row_off <= clear_row_on)
+	{
+		GoLGrid_int_clear_column_64_wide (gg, clear_row_on, clear_row_off);
+		return;
+	}
+	
+	if (clear_row_on < copy_row_on)
+		GoLGrid_int_clear_column_64_wide (gg, clear_row_on, copy_row_on);
+	
+	if (copy_row_off < clear_row_off)
+		GoLGrid_int_clear_column_64_wide (gg, copy_row_off, clear_row_off);
 }
 
 static __force_inline void GoLGrid_int_or_column (u64 *restrict obj_entry, const u64 *restrict or_entry, s32 row_cnt)
@@ -687,7 +762,7 @@ static __force_inline u64 GoLGrid_int_evolve_strip_merge (const u64 *restrict in
 
 // External functions
 
-static __noinline void GoLGrid_free (GoLGrid *gg)
+static __not_inline void GoLGrid_free (GoLGrid *gg)
 {
 	if (!gg)
 		return (void) ffsc (__func__);
@@ -698,7 +773,7 @@ static __noinline void GoLGrid_free (GoLGrid *gg)
 	GoLGrid_int_preinit (gg);
 }
 
-static __noinline int GoLGrid_create (GoLGrid *gg, const Rect *grid_rect)
+static __not_inline int GoLGrid_create (GoLGrid *gg, const Rect *grid_rect)
 {
 	if (!gg)
 		return ffsc (__func__);
@@ -825,7 +900,7 @@ static __force_inline int GoLGrid_set_cell_on (GoLGrid *gg, s32 x, s32 y)
 	return TRUE;
 }
 
-static __noinline int GoLGrid_set_cell_off (GoLGrid *gg, s32 x, s32 y)
+static __not_inline int GoLGrid_set_cell_off (GoLGrid *gg, s32 x, s32 y)
 {
 	if (!gg || !gg->grid)
 		return ffsc (__func__);
@@ -901,7 +976,24 @@ static __force_inline void GoLGrid_clear (GoLGrid *gg)
 	GoLGrid_int_set_empty_population_rect (gg);
 }
 
-static __noinline void GoLGrid_clear_noinline (GoLGrid *gg)
+static __force_inline void GoLGrid_clear_64_wide (GoLGrid *gg)
+{
+	if (!gg || !gg->grid || gg->grid_rect.width != 64)
+		return (void) ffsc (__func__);
+	
+	gg->generation = 0;
+	
+	if (gg->pop_x_off <= gg->pop_x_on)
+		return;
+	
+	s32 row_on = align_down_s32 (gg->pop_y_on, PREFERRED_VECTOR_BYTE_SIZE / sizeof (u64));
+	s32 row_off = align_up_s32 (gg->pop_y_off, PREFERRED_VECTOR_BYTE_SIZE / sizeof (u64));
+	
+	GoLGrid_int_clear_column_64_wide (gg, row_on, row_off);
+	GoLGrid_int_set_empty_population_rect (gg);
+}
+
+static __not_inline void GoLGrid_clear_noinline (GoLGrid *gg)
 {
 	GoLGrid_clear (gg);
 }
@@ -956,7 +1048,41 @@ static __force_inline u64 GoLGrid_get_hash (const GoLGrid *gg, const RandomDataA
 	return hash ^ (hash >> 47);
 }
 
-static __noinline u64 GoLGrid_get_hash_noinline (const GoLGrid *gg, const RandomDataArray *rda)
+static __force_inline u64 GoLGrid_get_hash_64_wide (const GoLGrid *gg, const RandomDataArray *rda)
+{
+	if (!gg || !gg->grid || gg->grid_rect.width != 64 || !rda || !RandomDataArray_verify_size (rda, gg->grid_rect.height))
+		return ffsc (__func__);
+	
+	u64 hash = 0x0123456789abcdefu;
+	
+	if (gg->pop_x_off <= gg->pop_x_on)
+		return hash ^ (hash >> 47);
+	
+	s32 row_on = align_down_s32 (gg->pop_y_on, PREFERRED_VECTOR_BYTE_SIZE / sizeof (u64));
+	s32 row_off = align_up_s32 (gg->pop_y_off, PREFERRED_VECTOR_BYTE_SIZE / sizeof (u64));
+	s32 row_cnt = row_off - row_on;
+	
+	const u64 *grid_entry = align_down_const_pointer (gg->grid + (u64) row_on, PREFERRED_VECTOR_BYTE_SIZE);
+	const u64 *rda_entry = align_down_const_pointer (rda->random_data + (u64) row_on, PREFERRED_VECTOR_BYTE_SIZE);
+	
+	s32 row_ix;
+	for (row_ix = 0; row_ix < row_cnt; row_ix++)
+	{
+		u64 grid_word = grid_entry [row_ix];
+		u64 random_word = rda_entry [row_ix];
+		u64 key_word = grid_word ^ random_word;
+		
+		key_word = key_word * 0xc6a4a7935bd1e995u;
+		key_word = key_word ^ (key_word >> 47);
+		key_word = key_word * 0xc6a4a7935bd1e995u;
+		
+		hash = hash ^ key_word;
+	}
+	
+	return hash ^ (hash >> 47);
+}
+
+static __not_inline u64 GoLGrid_get_hash_noinline (const GoLGrid *gg, const RandomDataArray *rda)
 {
 	return GoLGrid_get_hash (gg, rda);
 }
@@ -993,7 +1119,29 @@ static __force_inline u64 GoLGrid_get_population (const GoLGrid *gg)
 	return population;
 }
 
-static __noinline u64 GoLGrid_get_population_noinline (const GoLGrid *gg)
+static __force_inline u64 GoLGrid_get_population_64_wide (const GoLGrid *gg)
+{
+	if (!gg || !gg->grid || gg->grid_rect.width != 64)
+		return ffsc (__func__);
+	
+	u64 population = 0;
+	if (gg->pop_x_off <= gg->pop_x_on)
+		return population;
+	
+	s32 row_on = align_down_s32 (gg->pop_y_on, PREFERRED_VECTOR_BYTE_SIZE / sizeof (u64));
+	s32 row_off = align_up_s32 (gg->pop_y_off, PREFERRED_VECTOR_BYTE_SIZE / sizeof (u64));
+	s32 row_cnt = row_off - row_on;
+	
+	const u64 *entry = align_down_const_pointer (gg->grid + (u64) row_on, PREFERRED_VECTOR_BYTE_SIZE);
+	
+	s32 row_ix;
+	for (row_ix = 0; row_ix < row_cnt; row_ix++)
+		population += bit_count_u64 (entry [row_ix]);
+	
+	return population;
+}
+
+static __not_inline u64 GoLGrid_get_population_noinline (const GoLGrid *gg)
 {
 	return GoLGrid_get_population (gg);
 }
@@ -1031,7 +1179,7 @@ static __force_inline void GoLGrid_make_rightdown_projection (const GoLGrid *gg,
 		}
 }
 
-static __noinline void GoLGrid_make_rightdown_projection_noinline (const GoLGrid *gg, u64 *projection, s32 projection_size)
+static __not_inline void GoLGrid_make_rightdown_projection_noinline (const GoLGrid *gg, u64 *projection, s32 projection_size)
 {
 	GoLGrid_make_rightdown_projection (gg, projection, projection_size);
 }
@@ -1068,7 +1216,7 @@ static __force_inline void GoLGrid_make_rightup_projection (const GoLGrid *gg, u
 		}
 }
 
-static __noinline void GoLGrid_make_rightup_projection_noinline (const GoLGrid *gg, u64 *projection, s32 projection_size)
+static __not_inline void GoLGrid_make_rightup_projection_noinline (const GoLGrid *gg, u64 *projection, s32 projection_size)
 {
 	GoLGrid_make_rightup_projection (gg, projection, projection_size);
 }
@@ -1229,7 +1377,84 @@ static __force_inline int GoLGrid_find_next_on_cell (const GoLGrid *gg, int find
 	return FALSE;
 }
 
-static __noinline int GoLGrid_find_next_on_cell_noinline (const GoLGrid *gg, int find_first, s32 *x, s32 *y)
+static __force_inline int GoLGrid_find_next_on_cell_64_wide (const GoLGrid *gg, int find_first, s32 *x, s32 *y)
+{
+	if (!gg || !gg->grid || gg->grid_rect.width != 64 || !x || !y)
+	{
+		if (x)
+			*x = 0;
+		if (y)
+			*y = 0;
+		
+		return ffsc (__func__);
+	}
+	
+	if (gg->pop_x_off <= gg->pop_x_on)
+	{
+		*x = 0;
+		*y = 0;
+		return FALSE;
+	}
+	
+	s32 first_row;
+	
+	if (find_first)
+		first_row = gg->pop_y_on;
+	else
+	{
+		s32 first_x = *x - gg->grid_rect.left_x;
+		first_row = *y - gg->grid_rect.top_y;
+		
+		if ((u32) first_x >= (u32) 64 || (u32) first_row >= (u32) gg->grid_rect.height)
+		{
+			*x = 0;
+			*y = 0;
+			return ffsc (__func__);
+		}
+		
+		first_x++;
+		if (first_x != 64)
+		{
+			u64 first_word = gg->grid [first_row];
+			u64 remaining_word = first_word & (((u64) 0xffffffffffffffffu) >> first_x);
+			if (remaining_word != 0)
+			{
+				*x = (63 - most_significant_bit_u64 (remaining_word)) + gg->grid_rect.left_x;
+				*y = first_row + gg->grid_rect.top_y;
+				return TRUE;
+			}
+		}
+		
+		first_row++;
+		
+		if (first_row < gg->pop_y_on)
+			first_row = gg->pop_y_on;
+		else if (first_row >= gg->pop_y_off)
+		{
+			*x = 0;
+			*y = 0;
+			return FALSE;
+		}
+	}
+	
+	s32 row_ix;
+	for (row_ix = first_row; row_ix < gg->pop_y_off; row_ix++)
+	{
+		u64 grid_word = gg->grid [row_ix];
+		if (grid_word != 0)
+		{
+			*x = (63 - most_significant_bit_u64 (grid_word)) + gg->grid_rect.left_x;
+			*y = row_ix + gg->grid_rect.top_y;
+			return TRUE;
+		}
+	}
+	
+	*x = 0;
+	*y = 0;
+	return FALSE;
+}
+
+static __not_inline int GoLGrid_find_next_on_cell_noinline (const GoLGrid *gg, int find_first, s32 *x, s32 *y)
 {
 	return GoLGrid_find_next_on_cell (gg, find_first, x, y);
 }
@@ -1240,9 +1465,9 @@ static __force_inline int GoLGrid_is_equal (const GoLGrid *obj_gg, const GoLGrid
 		return ffsc (__func__);
 	
 	// Check if either grid is empty
-	if (obj_gg->pop_x_off <= obj_gg->pop_x_on && ref_gg->pop_x_off <= ref_gg->pop_x_on)
-		return TRUE;
-	if (obj_gg->pop_x_off <= obj_gg->pop_x_on || ref_gg->pop_x_off <= ref_gg->pop_x_on)
+	if (obj_gg->pop_x_off <= obj_gg->pop_x_on)
+		return (ref_gg->pop_x_off <= ref_gg->pop_x_on);
+	if (ref_gg->pop_x_off <= ref_gg->pop_x_on)
 		return FALSE;
 	
 	// Check if the bounding boxes are different
@@ -1279,7 +1504,35 @@ static __force_inline int GoLGrid_is_equal (const GoLGrid *obj_gg, const GoLGrid
 	return TRUE;
 }
 
-static __noinline int GoLGrid_is_equal_noinline (const GoLGrid *obj_gg, const GoLGrid *ref_gg)
+static __force_inline int GoLGrid_is_equal_64_wide (const GoLGrid *obj_gg, const GoLGrid *ref_gg)
+{
+	if (!obj_gg || !obj_gg->grid || obj_gg->grid_rect.width != 64 || !ref_gg || !ref_gg->grid || !Rect_is_equal (&ref_gg->grid_rect, &obj_gg->grid_rect))
+		return ffsc (__func__);
+	
+	if (obj_gg->pop_x_off <= obj_gg->pop_x_on)
+		return (ref_gg->pop_x_off <= ref_gg->pop_x_on);
+	if (ref_gg->pop_x_off <= ref_gg->pop_x_on)
+		return FALSE;
+	
+	if (obj_gg->pop_x_on != ref_gg->pop_x_on || obj_gg->pop_x_off != ref_gg->pop_x_off || obj_gg->pop_y_on != ref_gg->pop_y_on || obj_gg->pop_y_off != ref_gg->pop_y_off)
+		return FALSE;
+	
+	s32 row_on = align_down_s32 (obj_gg->pop_y_on, PREFERRED_VECTOR_BYTE_SIZE / sizeof (u64));
+	s32 row_off = align_up_s32 (obj_gg->pop_y_off, PREFERRED_VECTOR_BYTE_SIZE / sizeof (u64));
+	s32 row_cnt = row_off - row_on;
+	
+	const u64 *obj_entry = align_down_const_pointer (obj_gg->grid + (u64) row_on, PREFERRED_VECTOR_BYTE_SIZE);
+	u64 *ref_entry = align_down_pointer (ref_gg->grid + (u64) row_on, PREFERRED_VECTOR_BYTE_SIZE);
+	
+	u64 or_of_diff = 0;
+	s32 row_ix;
+	for (row_ix = 0; row_ix < row_cnt; row_ix++)
+		or_of_diff |= (obj_entry [row_ix] ^ ref_entry [row_ix]);
+	
+	return (or_of_diff == 0);
+}
+
+static __not_inline int GoLGrid_is_equal_noinline (const GoLGrid *obj_gg, const GoLGrid *ref_gg)
 {
 	return GoLGrid_is_equal (obj_gg, ref_gg);
 }
@@ -1329,7 +1582,35 @@ static __force_inline int GoLGrid_is_subset (const GoLGrid *obj_gg, const GoLGri
 	return TRUE;
 }
 
-static __noinline int GoLGrid_is_subset_noinline (const GoLGrid *obj_gg, const GoLGrid *ref_gg)
+static __force_inline int GoLGrid_is_subset_64_wide (const GoLGrid *obj_gg, const GoLGrid *ref_gg)
+{
+	if (!obj_gg || !obj_gg->grid || obj_gg->grid_rect.width != 64 || !ref_gg || !ref_gg->grid || !Rect_is_equal (&ref_gg->grid_rect, &obj_gg->grid_rect))
+		return ffsc (__func__);
+	
+	if (obj_gg->pop_x_off <= obj_gg->pop_x_on)
+		return TRUE;
+	if (ref_gg->pop_x_off <= ref_gg->pop_x_on)
+		return FALSE;
+	
+	if (obj_gg->pop_x_on < ref_gg->pop_x_on || obj_gg->pop_x_off > ref_gg->pop_x_off || obj_gg->pop_y_on < ref_gg->pop_y_on || obj_gg->pop_y_off > ref_gg->pop_y_off)
+		return FALSE;
+	
+	s32 row_on = align_down_s32 (obj_gg->pop_y_on, PREFERRED_VECTOR_BYTE_SIZE / sizeof (u64));
+	s32 row_off = align_up_s32 (obj_gg->pop_y_off, PREFERRED_VECTOR_BYTE_SIZE / sizeof (u64));
+	s32 row_cnt = row_off - row_on;
+	
+	const u64 *obj_entry = align_down_const_pointer (obj_gg->grid + (u64) row_on, PREFERRED_VECTOR_BYTE_SIZE);
+	u64 *ref_entry = align_down_pointer (ref_gg->grid + (u64) row_on, PREFERRED_VECTOR_BYTE_SIZE);
+	
+	u64 or_of_not_subset = 0;
+	s32 row_ix;
+	for (row_ix = 0; row_ix < row_cnt; row_ix++)
+		or_of_not_subset |= (obj_entry [row_ix] & ~ref_entry [row_ix]);
+	
+	return (or_of_not_subset == 0);
+}
+
+static __not_inline int GoLGrid_is_subset_noinline (const GoLGrid *obj_gg, const GoLGrid *ref_gg)
 {
 	return GoLGrid_is_subset (obj_gg, ref_gg);
 }
@@ -1380,7 +1661,36 @@ static __force_inline int GoLGrid_are_disjoint (const GoLGrid *obj_gg, const GoL
 	return TRUE;
 }
 
-static __noinline int GoLGrid_are_disjoint_noinline (const GoLGrid *obj_gg, const GoLGrid *ref_gg)
+static __force_inline int GoLGrid_are_disjoint_64_wide (const GoLGrid *obj_gg, const GoLGrid *ref_gg)
+{
+	if (!obj_gg || !obj_gg->grid || obj_gg->grid_rect.width != 64 || !ref_gg || !ref_gg->grid || !Rect_is_equal (&ref_gg->grid_rect, &obj_gg->grid_rect))
+		return ffsc (__func__);
+	
+	if (obj_gg->pop_x_off <= obj_gg->pop_x_on || ref_gg->pop_x_off <= ref_gg->pop_x_on)
+		return TRUE;
+	
+	s32 intersection_y_on = higher_of_s32 (obj_gg->pop_y_on, ref_gg->pop_y_on);
+	s32 intersection_y_off = lower_of_s32 (obj_gg->pop_y_off, ref_gg->pop_y_off);
+	
+	if (obj_gg->pop_x_on >= ref_gg->pop_x_off || obj_gg->pop_x_off <= ref_gg->pop_x_on || intersection_y_off <= intersection_y_on)
+		return TRUE;
+	
+	s32 row_on = align_down_s32 (intersection_y_on, PREFERRED_VECTOR_BYTE_SIZE / sizeof (u64));
+	s32 row_off = align_up_s32 (intersection_y_off, PREFERRED_VECTOR_BYTE_SIZE / sizeof (u64));
+	s32 row_cnt = row_off - row_on;
+	
+	const u64 *obj_entry = align_down_const_pointer (obj_gg->grid + (u64) row_on, PREFERRED_VECTOR_BYTE_SIZE);
+	const u64 *ref_entry = align_down_const_pointer (ref_gg->grid + (u64) row_on, PREFERRED_VECTOR_BYTE_SIZE);
+	
+	u64 or_of_col = 0;
+	s32 row_ix;
+	for (row_ix = 0; row_ix < row_cnt; row_ix++)
+		or_of_col |= (obj_entry [row_ix] & ref_entry [row_ix]);
+	
+	return (or_of_col == 0);
+}
+
+static __not_inline int GoLGrid_are_disjoint_noinline (const GoLGrid *obj_gg, const GoLGrid *ref_gg)
 {
 	return GoLGrid_are_disjoint (obj_gg, ref_gg);
 }
@@ -1417,7 +1727,26 @@ static __force_inline void GoLGrid_or (GoLGrid *obj_gg, const GoLGrid *or_gg)
 	GoLGrid_int_adjust_pop_rect_ored_bounding_box (obj_gg, or_gg->pop_x_on, or_gg->pop_x_off, or_gg->pop_y_on, or_gg->pop_y_off);
 }
 
-static __noinline void GoLGrid_or_noinline (GoLGrid *obj_gg, const GoLGrid *or_gg)
+static __force_inline void GoLGrid_or_64_wide (GoLGrid *obj_gg, const GoLGrid *or_gg)
+{
+	if (!obj_gg || !obj_gg->grid || obj_gg->grid_rect.width != 64 || !or_gg || !or_gg->grid || !Rect_is_equal (&or_gg->grid_rect, &obj_gg->grid_rect))
+		return (void) ffsc (__func__);
+	
+	if (or_gg->pop_x_off <= or_gg->pop_x_on)
+		return;
+	
+	s32 row_on = align_down_s32 (or_gg->pop_y_on, PREFERRED_VECTOR_BYTE_SIZE / sizeof (u64));
+	s32 row_off = align_up_s32 (or_gg->pop_y_off, PREFERRED_VECTOR_BYTE_SIZE / sizeof (u64));
+	s32 row_cnt = row_off - row_on;
+	
+	u64 *obj_entry = align_down_pointer (obj_gg->grid + (u64) row_on, PREFERRED_VECTOR_BYTE_SIZE);
+	const u64 *or_entry = align_down_const_pointer (or_gg->grid + (u64) row_on, PREFERRED_VECTOR_BYTE_SIZE);
+	
+	GoLGrid_int_or_column (obj_entry, or_entry, row_cnt);
+	GoLGrid_int_adjust_pop_rect_ored_bounding_box (obj_gg, or_gg->pop_x_on, or_gg->pop_x_off, or_gg->pop_y_on, or_gg->pop_y_off);
+}
+
+static __not_inline void GoLGrid_or_noinline (GoLGrid *obj_gg, const GoLGrid *or_gg)
 {
 	GoLGrid_or (obj_gg, or_gg);
 }
@@ -1471,7 +1800,41 @@ static __force_inline void GoLGrid_copy (const GoLGrid *src_gg, GoLGrid *dst_gg)
 	dst_gg->pop_y_off = src_gg->pop_y_off;
 }
 
-static __noinline void GoLGrid_copy_noinline (const GoLGrid *src_gg, GoLGrid *dst_gg)
+static __force_inline void GoLGrid_copy_64_wide (const GoLGrid *src_gg, GoLGrid *dst_gg)
+{
+	if (!src_gg || !src_gg->grid || src_gg->grid_rect.width != 64 || !dst_gg || !dst_gg->grid || dst_gg->grid_rect.width != 64 || dst_gg->grid_rect.height != src_gg->grid_rect.height)
+		return (void) ffsc (__func__);
+	
+	dst_gg->grid_rect.left_x = src_gg->grid_rect.left_x;
+	dst_gg->grid_rect.top_y = src_gg->grid_rect.top_y;
+	dst_gg->generation = src_gg->generation;
+	
+	if (src_gg->pop_x_off <= src_gg->pop_x_on)
+	{
+		GoLGrid_clear_64_wide (dst_gg);
+		return;
+	}
+	
+	s32 make_row_on = align_down_s32 (src_gg->pop_y_on, PREFERRED_VECTOR_BYTE_SIZE / sizeof (u64));
+	s32 make_row_off = align_up_s32 (src_gg->pop_y_off, PREFERRED_VECTOR_BYTE_SIZE / sizeof (u64));
+	s32 make_row_cnt = make_row_off - make_row_on;
+	
+	if (dst_gg->pop_x_on < dst_gg->pop_x_off)
+		if (dst_gg->pop_y_on < make_row_on || dst_gg->pop_y_off > make_row_off)
+			GoLGrid_int_clear_unaffected_area_64_wide (dst_gg, make_row_on, make_row_off);
+	
+	const u64 *src_entry = align_down_const_pointer (src_gg->grid + (u64) make_row_on, PREFERRED_VECTOR_BYTE_SIZE);
+	u64 *dst_entry = align_down_pointer (dst_gg->grid + (u64) make_row_on, PREFERRED_VECTOR_BYTE_SIZE);
+	
+	GoLGrid_int_copy_column (src_entry, dst_entry, make_row_cnt);
+	
+	dst_gg->pop_x_on = src_gg->pop_x_on;
+	dst_gg->pop_x_off = src_gg->pop_x_off;
+	dst_gg->pop_y_on = src_gg->pop_y_on;
+	dst_gg->pop_y_off = src_gg->pop_y_off;
+}
+
+static __not_inline void GoLGrid_copy_noinline (const GoLGrid *src_gg, GoLGrid *dst_gg)
 {
 	GoLGrid_copy (src_gg, dst_gg);
 }
@@ -1481,7 +1844,8 @@ static __force_inline void GoLGrid_subtract (GoLGrid *obj_gg, const GoLGrid *sub
 	if (!obj_gg || !obj_gg->grid || !subtract_gg || !subtract_gg->grid || !Rect_is_equal (&subtract_gg->grid_rect, &obj_gg->grid_rect))
 		return (void) ffsc (__func__);
 	
-	if (subtract_gg->pop_x_off <= subtract_gg->pop_x_on)
+	// Check if either grid is empty
+	if (obj_gg->pop_x_off <= obj_gg->pop_x_on || subtract_gg->pop_x_off <= subtract_gg->pop_x_on)
 		return;
 	
 	s32 intersection_x_on = higher_of_s32 (obj_gg->pop_x_on, subtract_gg->pop_x_on);
@@ -1525,7 +1889,44 @@ static __force_inline void GoLGrid_subtract (GoLGrid *obj_gg, const GoLGrid *sub
 		GoLGrid_int_tighten_pop_y_off (obj_gg);
 }
 
-static __noinline void GoLGrid_subtract_noinline (GoLGrid *obj_gg, const GoLGrid *subtract_gg)
+static __force_inline void GoLGrid_subtract_64_wide (GoLGrid *obj_gg, const GoLGrid *subtract_gg)
+{
+	if (!obj_gg || !obj_gg->grid || obj_gg->grid_rect.width != 64 || !subtract_gg || !subtract_gg->grid || !Rect_is_equal (&subtract_gg->grid_rect, &obj_gg->grid_rect))
+		return (void) ffsc (__func__);
+	
+	if (obj_gg->pop_x_off <= obj_gg->pop_x_on || subtract_gg->pop_x_off <= subtract_gg->pop_x_on)
+		return;
+	
+	s32 intersection_y_on = higher_of_s32 (obj_gg->pop_y_on, subtract_gg->pop_y_on);
+	s32 intersection_y_off = lower_of_s32 (obj_gg->pop_y_off, subtract_gg->pop_y_off);
+	
+	if (obj_gg->pop_x_on >= subtract_gg->pop_x_off || obj_gg->pop_x_off <= subtract_gg->pop_x_on || intersection_y_off <= intersection_y_on)
+		return;
+	
+	s32 row_on = align_down_s32 (intersection_y_on, PREFERRED_VECTOR_BYTE_SIZE / sizeof (u64));
+	s32 row_off = align_up_s32 (intersection_y_off, PREFERRED_VECTOR_BYTE_SIZE / sizeof (u64));
+	s32 row_cnt = row_off - row_on;
+	
+	u64 *obj_entry = align_down_pointer (obj_gg->grid + (u64) row_on, PREFERRED_VECTOR_BYTE_SIZE);
+	const u64 *subtract_entry = align_down_const_pointer (subtract_gg->grid + (u64) row_on, PREFERRED_VECTOR_BYTE_SIZE);
+	
+	GoLGrid_int_subtract_column (obj_entry, subtract_entry, row_cnt);
+	
+	if (subtract_gg->pop_x_on <= obj_gg->pop_x_on)
+		if (!GoLGrid_int_tighten_pop_x_on_64_wide (obj_gg))
+			return;
+	
+	if (subtract_gg->pop_x_off >= obj_gg->pop_x_off)
+		GoLGrid_int_tighten_pop_x_off_64_wide (obj_gg);
+
+	if (subtract_gg->pop_y_on <= obj_gg->pop_y_on)
+		GoLGrid_int_tighten_pop_y_on_64_wide (obj_gg);
+
+	if (subtract_gg->pop_y_off >= obj_gg->pop_y_off)
+		GoLGrid_int_tighten_pop_y_off_64_wide (obj_gg);
+}
+
+static __not_inline void GoLGrid_subtract_noinline (GoLGrid *obj_gg, const GoLGrid *subtract_gg)
 {
 	GoLGrid_subtract (obj_gg, subtract_gg);
 }
@@ -1533,7 +1934,7 @@ static __noinline void GoLGrid_subtract_noinline (GoLGrid *obj_gg, const GoLGrid
 // The generation count of dst_gg is copied from src_1_gg
 static __force_inline void GoLGrid_and (const GoLGrid *src_1_gg, const GoLGrid *src_2_gg, GoLGrid *dst_gg)
 {
-	if (!src_1_gg || !src_1_gg->grid || !src_2_gg || !src_2_gg->grid || !dst_gg || !dst_gg->grid || !Rect_is_equal (&src_1_gg->grid_rect, &src_2_gg->grid_rect) ||
+	if (!src_1_gg || !src_1_gg->grid || !src_2_gg || !src_2_gg->grid || !Rect_is_equal (&src_1_gg->grid_rect, &src_2_gg->grid_rect) || !dst_gg || !dst_gg->grid ||
 			dst_gg->grid_rect.width != src_1_gg->grid_rect.width || dst_gg->grid_rect.height != src_1_gg->grid_rect.height)
 		return (void) ffsc (__func__);
 	
@@ -1620,7 +2021,60 @@ static __force_inline void GoLGrid_and (const GoLGrid *src_1_gg, const GoLGrid *
 	}
 }
 
-static __noinline void GoLGrid_and_noinline (const GoLGrid *src_1_gg, const GoLGrid *src_2_gg, GoLGrid *dst_gg)
+static __force_inline void GoLGrid_and_64_wide (const GoLGrid *src_1_gg, const GoLGrid *src_2_gg, GoLGrid *dst_gg)
+{
+	if (!src_1_gg || !src_1_gg->grid || src_1_gg->grid_rect.width != 64 || !src_2_gg || !src_2_gg->grid || !Rect_is_equal (&src_1_gg->grid_rect, &src_2_gg->grid_rect) ||
+			!dst_gg || !dst_gg->grid || dst_gg->grid_rect.width != 64 || dst_gg->grid_rect.height != src_1_gg->grid_rect.height)
+		return (void) ffsc (__func__);
+	
+	dst_gg->grid_rect.left_x = src_1_gg->grid_rect.left_x;
+	dst_gg->grid_rect.top_y = src_1_gg->grid_rect.top_y;
+	dst_gg->generation = src_1_gg->generation;
+	
+	if (src_1_gg->pop_x_off <= src_1_gg->pop_x_on || src_2_gg->pop_x_off <= src_2_gg->pop_x_on)
+	{
+		GoLGrid_clear_64_wide (dst_gg);
+		return;
+	}
+	
+	s32 intersection_y_on = higher_of_s32 (src_1_gg->pop_y_on, src_2_gg->pop_y_on);
+	s32 intersection_y_off = lower_of_s32 (src_1_gg->pop_y_off, src_2_gg->pop_y_off);
+	
+	if (src_1_gg->pop_x_on >= src_2_gg->pop_x_off || src_1_gg->pop_x_off <= src_2_gg->pop_x_on || intersection_y_off <= intersection_y_on)
+	{
+		GoLGrid_clear_64_wide (dst_gg);
+		return;
+	}
+	
+	s32 row_on = align_down_s32 (intersection_y_on, PREFERRED_VECTOR_BYTE_SIZE / sizeof (u64));
+	s32 row_off = align_up_s32 (intersection_y_off, PREFERRED_VECTOR_BYTE_SIZE / sizeof (u64));
+	s32 row_cnt = row_off - row_on;
+	
+	if (dst_gg->pop_x_on < dst_gg->pop_x_off)
+		if (dst_gg->pop_y_on < row_on || dst_gg->pop_y_off > row_off)
+			GoLGrid_int_clear_unaffected_area_64_wide (dst_gg, row_on, row_off);
+	
+	const u64 *src_1_entry = align_down_const_pointer (src_1_gg->grid + (u64) row_on, PREFERRED_VECTOR_BYTE_SIZE);
+	const u64 *src_2_entry = align_down_const_pointer (src_2_gg->grid + (u64) row_on, PREFERRED_VECTOR_BYTE_SIZE);
+	u64 *dst_entry = align_down_pointer (dst_gg->grid + (u64) row_on, PREFERRED_VECTOR_BYTE_SIZE);
+	
+	u64 or_of_col = GoLGrid_int_and_column (src_1_entry, src_2_entry, dst_entry, row_cnt);
+	
+	if (or_of_col == 0)
+		GoLGrid_int_set_empty_population_rect (dst_gg);
+	else
+	{
+		dst_gg->pop_x_on = 63 - most_significant_bit_u64 (or_of_col);
+		dst_gg->pop_x_off = 64 - least_significant_bit_u64 (or_of_col);
+		
+		dst_gg->pop_y_on = intersection_y_on;
+		dst_gg->pop_y_off = intersection_y_off;
+		GoLGrid_int_tighten_pop_y_on_64_wide (dst_gg);
+		GoLGrid_int_tighten_pop_y_off_64_wide (dst_gg);
+	}
+}
+
+static __not_inline void GoLGrid_and_noinline (const GoLGrid *src_1_gg, const GoLGrid *src_2_gg, GoLGrid *dst_gg)
 {
 	GoLGrid_and (src_1_gg, src_2_gg, dst_gg);
 }
@@ -1722,7 +2176,7 @@ static __force_inline int GoLGrid_copy_unmatched (const GoLGrid *src_gg, GoLGrid
 	return FALSE;
 }
 
-static __noinline int GoLGrid_copy_unmatched_noinline (const GoLGrid *src_gg, GoLGrid *dst_gg, s32 move_x, s32 move_y)
+static __not_inline int GoLGrid_copy_unmatched_noinline (const GoLGrid *src_gg, GoLGrid *dst_gg, s32 move_x, s32 move_y)
 {
 	return GoLGrid_copy_unmatched (src_gg, dst_gg, move_x, move_y);
 }
@@ -1784,7 +2238,7 @@ static __force_inline void GoLGrid_flip_horizontally (const GoLGrid *src_gg, GoL
 	dst_gg->pop_y_off = src_gg->pop_y_off;
 }
 
-static __noinline void GoLGrid_flip_horizontally_noinline (const GoLGrid *src_gg, GoLGrid *dst_gg)
+static __not_inline void GoLGrid_flip_horizontally_noinline (const GoLGrid *src_gg, GoLGrid *dst_gg)
 {
 	GoLGrid_flip_horizontally (src_gg, dst_gg);
 }
@@ -1835,7 +2289,7 @@ static __force_inline void GoLGrid_flip_vertically (const GoLGrid *src_gg, GoLGr
 	dst_gg->pop_y_off = src_gg->pop_y_off;
 }
 
-static __noinline void GoLGrid_flip_vertically_noinline (const GoLGrid *src_gg, GoLGrid *dst_gg)
+static __not_inline void GoLGrid_flip_vertically_noinline (const GoLGrid *src_gg, GoLGrid *dst_gg)
 {
 	GoLGrid_flip_vertically (src_gg, dst_gg);
 }
@@ -1904,7 +2358,7 @@ static __force_inline void GoLGrid_flip_diagonally (const GoLGrid *src_gg, GoLGr
 	dst_gg->pop_y_off = src_gg->pop_x_off;
 }
 
-static __noinline void GoLGrid_flip_diagonally_noinline (const GoLGrid *src_gg, GoLGrid *dst_gg)
+static __not_inline void GoLGrid_flip_diagonally_noinline (const GoLGrid *src_gg, GoLGrid *dst_gg)
 {
 	GoLGrid_flip_diagonally (src_gg, dst_gg);
 }
@@ -1995,7 +2449,44 @@ static __force_inline void GoLGrid_bleed_4 (const GoLGrid *src_gg, GoLGrid *dst_
 	dst_gg->pop_y_off = required_row_off;
 }
 
-static __noinline void GoLGrid_bleed_4_noinline (const GoLGrid *src_gg, GoLGrid *dst_gg)
+static __force_inline void GoLGrid_bleed_4_64_wide (const GoLGrid *src_gg, GoLGrid *dst_gg)
+{
+	if (!src_gg || !src_gg->grid || src_gg->grid_rect.width != 64 || !dst_gg || !dst_gg->grid || dst_gg->grid_rect.width != 64 || dst_gg->grid_rect.height != src_gg->grid_rect.height)
+		return (void) ffsc (__func__);
+	
+	dst_gg->grid_rect.left_x = src_gg->grid_rect.left_x;
+	dst_gg->grid_rect.top_y = src_gg->grid_rect.top_y;
+	dst_gg->generation = src_gg->generation;
+	
+	if (src_gg->pop_x_off <= src_gg->pop_x_on)
+	{
+		GoLGrid_clear_64_wide (dst_gg);
+		return;
+	}
+	
+	s32 required_row_on = higher_of_s32 (src_gg->pop_y_on - 1, 0);
+	s32 required_row_off = lower_of_s32 (src_gg->pop_y_off + 1, src_gg->grid_rect.height);
+	s32 make_row_on = align_down_s32 (required_row_on, PREFERRED_VECTOR_BYTE_SIZE / sizeof (u64));
+	s32 make_row_off = align_up_s32 (required_row_off, PREFERRED_VECTOR_BYTE_SIZE / sizeof (u64));
+	
+	s32 make_row_cnt = make_row_off - make_row_on;
+	
+	if (dst_gg->pop_x_on < dst_gg->pop_x_off)
+		if (dst_gg->pop_y_on < make_row_on || dst_gg->pop_y_off > make_row_off)
+			GoLGrid_int_clear_unaffected_area_64_wide (dst_gg, make_row_on, make_row_off);
+	
+	const u64 *src_entry = align_down_const_pointer (src_gg->grid + (u64) make_row_on, PREFERRED_VECTOR_BYTE_SIZE);
+	u64 *dst_entry = align_down_pointer (dst_gg->grid + (u64) make_row_on, PREFERRED_VECTOR_BYTE_SIZE);
+	
+	GoLGrid_int_bleed_4_column (src_entry, dst_entry, make_row_cnt);
+	
+	dst_gg->pop_x_on = higher_of_s32 (src_gg->pop_x_on - 1, 0);
+	dst_gg->pop_x_off = lower_of_s32 (src_gg->pop_x_off + 1, src_gg->grid_rect.width);
+	dst_gg->pop_y_on = required_row_on;
+	dst_gg->pop_y_off = required_row_off;
+}
+
+static __not_inline void GoLGrid_bleed_4_noinline (const GoLGrid *src_gg, GoLGrid *dst_gg)
 {
 	GoLGrid_bleed_4 (src_gg, dst_gg);
 }
@@ -2086,7 +2577,44 @@ static __force_inline void GoLGrid_bleed_8 (const GoLGrid *src_gg, GoLGrid *dst_
 	dst_gg->pop_y_off = required_row_off;
 }
 
-static __noinline void GoLGrid_bleed_8_noinline (const GoLGrid *src_gg, GoLGrid *dst_gg)
+static __force_inline void GoLGrid_bleed_8_64_wide (const GoLGrid *src_gg, GoLGrid *dst_gg)
+{
+	if (!src_gg || !src_gg->grid || src_gg->grid_rect.width != 64 || !dst_gg || !dst_gg->grid || dst_gg->grid_rect.width != 64 || dst_gg->grid_rect.height != src_gg->grid_rect.height)
+		return (void) ffsc (__func__);
+	
+	dst_gg->grid_rect.left_x = src_gg->grid_rect.left_x;
+	dst_gg->grid_rect.top_y = src_gg->grid_rect.top_y;
+	dst_gg->generation = src_gg->generation;
+	
+	if (src_gg->pop_x_off <= src_gg->pop_x_on)
+	{
+		GoLGrid_clear_64_wide (dst_gg);
+		return;
+	}
+	
+	s32 required_row_on = higher_of_s32 (src_gg->pop_y_on - 1, 0);
+	s32 required_row_off = lower_of_s32 (src_gg->pop_y_off + 1, src_gg->grid_rect.height);
+	s32 make_row_on = align_down_s32 (required_row_on, PREFERRED_VECTOR_BYTE_SIZE / sizeof (u64));
+	s32 make_row_off = align_up_s32 (required_row_off, PREFERRED_VECTOR_BYTE_SIZE / sizeof (u64));
+	
+	s32 make_row_cnt = make_row_off - make_row_on;
+	
+	if (dst_gg->pop_x_on < dst_gg->pop_x_off)
+		if (dst_gg->pop_y_on < make_row_on || dst_gg->pop_y_off > make_row_off)
+			GoLGrid_int_clear_unaffected_area_64_wide (dst_gg, make_row_on, make_row_off);
+	
+	const u64 *src_entry = align_down_const_pointer (src_gg->grid + (u64) make_row_on, PREFERRED_VECTOR_BYTE_SIZE);
+	u64 *dst_entry = align_down_pointer (dst_gg->grid + (u64) make_row_on, PREFERRED_VECTOR_BYTE_SIZE);
+	
+	GoLGrid_int_bleed_8_column (src_entry, dst_entry, make_row_cnt);
+	
+	dst_gg->pop_x_on = higher_of_s32 (src_gg->pop_x_on - 1, 0);
+	dst_gg->pop_x_off = lower_of_s32 (src_gg->pop_x_off + 1, src_gg->grid_rect.width);
+	dst_gg->pop_y_on = required_row_on;
+	dst_gg->pop_y_off = required_row_off;
+}
+
+static __not_inline void GoLGrid_bleed_8_noinline (const GoLGrid *src_gg, GoLGrid *dst_gg)
 {
 	GoLGrid_bleed_8 (src_gg, dst_gg);
 }
@@ -2229,7 +2757,52 @@ static __force_inline void GoLGrid_evolve (const GoLGrid *in_gg, GoLGrid *out_gg
 	}
 }
 
-static __noinline void GoLGrid_evolve_noinline (const GoLGrid *in_gg, GoLGrid *out_gg)
+static __force_inline void GoLGrid_evolve_64_wide (const GoLGrid *in_gg, GoLGrid *out_gg)
+{
+	if (!in_gg || !in_gg->grid || in_gg->grid_rect.width != 64 || !out_gg || !out_gg->grid || out_gg->grid_rect.width != 64 || out_gg->grid_rect.height != in_gg->grid_rect.height)
+		return (void) ffsc (__func__);
+	
+	out_gg->grid_rect.left_x = in_gg->grid_rect.left_x;
+	out_gg->grid_rect.top_y = in_gg->grid_rect.top_y;
+	out_gg->generation = in_gg->generation + 1;
+	
+	if (in_gg->pop_x_off <= in_gg->pop_x_on)
+	{
+		GoLGrid_clear_64_wide (out_gg);
+		return;
+	}
+	
+	s32 required_row_on = higher_of_s32 (in_gg->pop_y_on - 1, 0);
+	s32 required_row_off = lower_of_s32 (in_gg->pop_y_off + 1, in_gg->grid_rect.height);
+	s32 make_row_on = align_down_s32 (required_row_on, PREFERRED_VECTOR_BYTE_SIZE / sizeof (u64));
+	s32 make_row_off = align_up_s32 (required_row_off, PREFERRED_VECTOR_BYTE_SIZE / sizeof (u64));
+	
+	s32 make_row_cnt = make_row_off - make_row_on;
+	
+	if (out_gg->pop_x_on < out_gg->pop_x_off)
+		if (out_gg->pop_y_on < make_row_on || out_gg->pop_y_off > make_row_off)
+			GoLGrid_int_clear_unaffected_area_64_wide (out_gg, make_row_on, make_row_off);
+	
+	const u64 *in_entry = align_down_const_pointer (in_gg->grid + (u64) make_row_on, PREFERRED_VECTOR_BYTE_SIZE);
+	u64 *out_entry = align_down_pointer (out_gg->grid + (u64) make_row_on, PREFERRED_VECTOR_BYTE_SIZE);
+	
+	u64 or_of_result = GoLGrid_int_evolve_column (in_entry, out_entry, make_row_cnt);
+	
+	if (or_of_result == 0)
+		GoLGrid_int_set_empty_population_rect (out_gg);
+	else
+	{
+		out_gg->pop_x_on = 63 - most_significant_bit_u64 (or_of_result);
+		out_gg->pop_x_off = 64 - least_significant_bit_u64 (or_of_result);
+		
+		out_gg->pop_y_on = required_row_on;
+		out_gg->pop_y_off = required_row_off;
+		GoLGrid_int_tighten_pop_y_on_64_wide (out_gg);
+		GoLGrid_int_tighten_pop_y_off_64_wide (out_gg);
+	}
+}
+
+static __not_inline void GoLGrid_evolve_noinline (const GoLGrid *in_gg, GoLGrid *out_gg)
 {
 	GoLGrid_evolve (in_gg, out_gg);
 }

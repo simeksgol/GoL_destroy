@@ -16,7 +16,7 @@ typedef struct
 	HashTable_u64_entry *table;
 } HashTable_u64;
 
-static __inline_at_will void HashTable_u64_preinit (HashTable_u64 *ht)
+static __may_inline void HashTable_u64_preinit (HashTable_u64 *ht)
 {
 	if (!ht)
 		return (void) ffsc (__func__);
@@ -31,7 +31,7 @@ static __inline_at_will void HashTable_u64_preinit (HashTable_u64 *ht)
 	ht->table = NULL;
 }
 
-static __noinline void HashTable_u64_free (HashTable_u64 *ht)
+static __not_inline void HashTable_u64_free (HashTable_u64 *ht)
 {
 	if (!ht)
 		return (void) ffsc (__func__);
@@ -42,7 +42,7 @@ static __noinline void HashTable_u64_free (HashTable_u64 *ht)
 	HashTable_u64_preinit (ht);
 }
 
-static __noinline void HashTable_u64_clear (HashTable_u64 *ht)
+static __not_inline void HashTable_u64_clear (HashTable_u64 *ht)
 {
 	if (!ht || !ht->table)
 		return (void) ffsc (__func__);
@@ -58,7 +58,7 @@ static __noinline void HashTable_u64_clear (HashTable_u64 *ht)
 	}
 }
 
-static __noinline int HashTable_u64_allocate (HashTable_u64 *ht, u64 capacity)
+static __not_inline int HashTable_u64_allocate (HashTable_u64 *ht, u64 capacity)
 {
 	if (!ht || ht->table != NULL || bit_count_u64 (capacity) != 1)
 		return ffsc (__func__);
@@ -76,7 +76,7 @@ static __noinline int HashTable_u64_allocate (HashTable_u64 *ht, u64 capacity)
 	return TRUE;
 }
 
-static __noinline int HashTable_u64_create (HashTable_u64 *ht, u64 first_capacity, double reallocate_filled_part, double fail_filled_part)
+static __not_inline int HashTable_u64_create (HashTable_u64 *ht, u64 first_capacity, double reallocate_filled_part, double fail_filled_part)
 {
 	if (!ht)
 		return ffsc (__func__);
@@ -100,7 +100,7 @@ static __noinline int HashTable_u64_create (HashTable_u64 *ht, u64 first_capacit
 }
 
 static __force_inline int HashTable_u64_store (HashTable_u64 *ht, u64 key, u64 data, int replace_previous_data, int *was_present);
-static __noinline int HashTable_u64_reallocate (HashTable_u64 *ht, u64 new_capacity)
+static __not_inline int HashTable_u64_reallocate (HashTable_u64 *ht, u64 new_capacity)
 {
 	if (!ht || !ht->table || new_capacity <= ht->total_capacity)
 		return ffsc (__func__);
@@ -158,7 +158,7 @@ static __force_inline int HashTable_u64_get_data (const HashTable_u64 *ht, u64 k
 	}
 }
 
-static __noinline u64 HashTable_u64_memory_size (const HashTable_u64 *ht)
+static __not_inline u64 HashTable_u64_memory_size (const HashTable_u64 *ht)
 {
 	if (!ht)
 		return ffsc (__func__);
